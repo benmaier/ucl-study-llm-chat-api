@@ -1,0 +1,798 @@
+# OpenAI Responses API Client Module
+
+A TypeScript module for interacting with OpenAI's Responses API, featuring code interpreter with streaming support, file generation, and artifact retrieval.
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [API Reference](#api-reference)
+  - [Types](#types)
+  - [Functions](#functions)
+- [Streaming Events](#streaming-events)
+- [Frontend Integration](#frontend-integration)
+  - [Next.js API Route](#nextjs-api-route)
+  - [React Frontend Component](#react-frontend-component)
+  - [Server-Sent Events (SSE)](#server-sent-events-sse)
+- [Container Sessions](#container-sessions)
+- [File Downloads](#file-downloads)
+- [Error Handling](#error-handling)
+- [Common Pitfalls](#common-pitfalls)
+- [Comparison with Claude API](#comparison-with-claude-api)
+
+---
+
+## Installation
+
+```bash
+npm install openai dotenv
+```
+
+Set your API key in `.env`:
+
+```
+OPENAI_API_KEY=your-api-key-here
+```
+
+## Quick Start
+
+```typescript
+import "dotenv/config";
+import {
+  createOpenAIClient,
+  executeCodeWithOpenAIStreaming,
+  downloadGeneratedFiles,
+  StreamEvent,
+} from "./modules/openai-client.js";
+
+const client = createOpenAIClient();
+
+const result = await executeCodeWithOpenAIStreaming(
+  client,
+  "Create a plot of y = x^2 and save it as plot.png",
+  (event) => {
+    if (event.type === "text") {
+      process.stdout.write(event.text || "");
+    }
+  }
+);
+
+// Download generated images
+if (result.files.length > 0) {
+  await downloadGeneratedFiles(result.files, "./output");
+}
+
+// Access code artifacts (Python code executed)
+for (const artifact of result.codeArtifacts) {
+  console.log(`Code ID: ${artifact.id}`);
+  console.log(artifact.code);
+}
+```
+
+---
+
+## API Reference
+
+### Types
+
+#### `CodeExecutionFile`
+
+Represents a file generated during code execution (images, data files, etc.).
+
+```typescript
+interface CodeExecutionFile {
+  file_id: string;       // Unique identifier for downloading
+  container_id: string;  // Container where file was created
+  filename: string;      // Original filename
+}
+```
+
+#### `CodeArtifact`
+
+Represents Python code executed by the code interpreter.
+
+```typescript
+interface CodeArtifact {
+  id: string;     // Unique identifier for the code execution call
+  code: string;   // Full Python source code that was executed
+  status: string; // Execution status ("completed", "in_progress", etc.)
+}
+```
+
+#### `CodeExecutionResult`
+
+The complete result returned after execution.
+
+```typescript
+interface CodeExecutionResult {
+  text: string;                  // Model's text response
+  files: CodeExecutionFile[];    // Generated files (images, etc.)
+  codeArtifacts: CodeArtifact[]; // Python code that was executed
+  containerId?: string;          // Container ID for follow-up requests
+  responseId: string;            // Response ID for reference
+}
+```
+
+#### `StreamEvent`
+
+Events emitted during streaming execution.
+
+```typescript
+interface StreamEvent {
+  type: string;       // Event type (see below)
+  text?: string;      // Text content (for "text" type)
+  code?: string;      // Code content (for "code" and "code_complete" types)
+  toolName?: string;  // Tool name (for "tool_start" and "tool_end" types)
+}
+```
+
+### Functions
+
+#### `createOpenAIClient()`
+
+Creates an OpenAI client using the `OPENAI_API_KEY` environment variable.
+
+```typescript
+function createOpenAIClient(): OpenAI
+```
+
+#### `executeCodeWithOpenAI()`
+
+Execute code with OpenAI's code interpreter (non-streaming).
+
+```typescript
+async function executeCodeWithOpenAI(
+  client: OpenAI,
+  prompt: string,
+  options?: {
+    model?: string;  // Default: "gpt-4o"
+  }
+): Promise<CodeExecutionResult>
+```
+
+#### `executeCodeWithOpenAIStreaming()`
+
+Execute code with streaming - provides real-time events during execution.
+
+```typescript
+async function executeCodeWithOpenAIStreaming(
+  client: OpenAI,
+  prompt: string,
+  onEvent: (event: StreamEvent) => void,
+  options?: {
+    model?: string;  // Default: "gpt-4o"
+  }
+): Promise<CodeExecutionResult>
+```
+
+#### `downloadGeneratedFiles()`
+
+Download files generated during code execution to disk.
+
+```typescript
+async function downloadGeneratedFiles(
+  files: CodeExecutionFile[],
+  outputDir: string = "."
+): Promise<string[]>  // Returns array of saved file paths
+```
+
+#### `chatWithOpenAI()`
+
+Simple chat without code interpreter (non-streaming).
+
+```typescript
+async function chatWithOpenAI(
+  client: OpenAI,
+  message: string,
+  options?: {
+    model?: string;
+    system?: string;
+  }
+): Promise<string>
+```
+
+#### `streamChatWithOpenAI()`
+
+Simple chat with streaming (no code interpreter).
+
+```typescript
+async function streamChatWithOpenAI(
+  client: OpenAI,
+  message: string,
+  onText: (text: string) => void,
+  options?: {
+    model?: string;
+    system?: string;
+  }
+): Promise<string>
+```
+
+---
+
+## Streaming Events
+
+During `executeCodeWithOpenAIStreaming()`, the `onEvent` callback receives events in this order:
+
+| Event Type | When | Properties |
+|------------|------|------------|
+| `tool_start` | Code interpreter begins | `toolName`: "code_interpreter" |
+| `code_executing` | Code execution starts | - |
+| `code` | Code is being written | `code`: Code chunk |
+| `code_complete` | Full code available | `code`: Complete code |
+| `tool_end` | Code interpreter completes | `toolName`: "code_interpreter" |
+| `text` | Text response streams | `text`: Text chunk |
+
+### Event Timeline
+
+```
+1. tool_start       → { toolName: "code_interpreter" }
+2. code_executing   → Code execution beginning
+3. code             → "import matplotlib..."
+4. code             → ".pyplot as plt..."
+5. code             → "\nimport numpy..."
+6. ...              → (more code deltas)
+7. code_complete    → { code: "full code here" }
+8. tool_end         → { toolName: "code_interpreter" }
+9. text             → "The plot of..."
+10. text            → " y = x^2..."
+11. ...             → (more text deltas)
+```
+
+### Raw API Events
+
+The OpenAI Responses API emits these events (mapped to StreamEvent types):
+
+| API Event | StreamEvent Type |
+|-----------|------------------|
+| `response.output_item.added` (code_interpreter_call) | `tool_start` |
+| `response.code_interpreter_call.in_progress` | `code_executing` |
+| `response.code_interpreter_call_code.delta` | `code` |
+| `response.code_interpreter_call_code.done` | `code_complete` |
+| `response.code_interpreter_call.completed` | `tool_end` |
+| `response.output_text.delta` | `text` |
+| `response.output_text.annotation.added` | (file captured internally) |
+| `response.completed` | (final response captured) |
+
+---
+
+## Frontend Integration
+
+### Next.js API Route
+
+Create an API route that streams events to the frontend using Server-Sent Events (SSE).
+
+```typescript
+// app/api/openai/route.ts
+import { NextRequest } from "next/server";
+import {
+  createOpenAIClient,
+  executeCodeWithOpenAIStreaming,
+  downloadGeneratedFiles,
+  StreamEvent,
+} from "@/lib/openai-client";
+
+export async function POST(req: NextRequest) {
+  const { prompt } = await req.json();
+  const client = createOpenAIClient();
+
+  // Create a TransformStream for SSE
+  const encoder = new TextEncoder();
+  const stream = new TransformStream();
+  const writer = stream.writable.getWriter();
+
+  // Helper to send SSE events
+  const sendEvent = async (event: string, data: any) => {
+    await writer.write(
+      encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+    );
+  };
+
+  // Process in background
+  (async () => {
+    try {
+      const result = await executeCodeWithOpenAIStreaming(
+        client,
+        prompt,
+        async (event: StreamEvent) => {
+          await sendEvent("stream", event);
+        }
+      );
+
+      // Send code artifacts
+      for (const artifact of result.codeArtifacts) {
+        await sendEvent("code_artifact", artifact);
+      }
+
+      // Download and send file URLs
+      if (result.files.length > 0) {
+        const paths = await downloadGeneratedFiles(
+          result.files,
+          "./public/generated"
+        );
+        for (const path of paths) {
+          await sendEvent("file", { url: path.replace("./public", "") });
+        }
+      }
+
+      // Send completion with full result
+      await sendEvent("done", {
+        text: result.text,
+        containerId: result.containerId,
+        responseId: result.responseId,
+        codeArtifacts: result.codeArtifacts,
+        fileCount: result.files.length,
+      });
+    } catch (error) {
+      await sendEvent("error", { message: String(error) });
+    } finally {
+      await writer.close();
+    }
+  })();
+
+  return new Response(stream.readable, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
+}
+```
+
+### React Frontend Component
+
+```tsx
+// components/OpenAIChat.tsx
+"use client";
+
+import { useState, useCallback } from "react";
+
+interface CodeArtifact {
+  id: string;
+  code: string;
+  status: string;
+}
+
+interface ChatState {
+  streamingText: string;
+  streamingCode: string;
+  codeArtifacts: CodeArtifact[];
+  generatedFiles: string[];
+  isExecutingCode: boolean;
+  isLoading: boolean;
+  error: string | null;
+}
+
+export function OpenAIChat() {
+  const [prompt, setPrompt] = useState("");
+  const [state, setState] = useState<ChatState>({
+    streamingText: "",
+    streamingCode: "",
+    codeArtifacts: [],
+    generatedFiles: [],
+    isExecutingCode: false,
+    isLoading: false,
+    error: null,
+  });
+
+  const handleSubmit = useCallback(async () => {
+    if (!prompt.trim()) return;
+
+    setState((prev) => ({
+      ...prev,
+      streamingText: "",
+      streamingCode: "",
+      codeArtifacts: [],
+      generatedFiles: [],
+      isLoading: true,
+      error: null,
+    }));
+
+    try {
+      const response = await fetch("/api/openai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+
+      if (!response.ok) throw new Error("Request failed");
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) throw new Error("No response body");
+
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let eventType = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            eventType = line.slice(7);
+          } else if (line.startsWith("data: ") && eventType) {
+            const data = JSON.parse(line.slice(6));
+            handleSSEEvent(eventType, data);
+            eventType = "";
+          }
+        }
+      }
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        error: String(error),
+        isLoading: false,
+      }));
+    }
+  }, [prompt]);
+
+  const handleSSEEvent = (eventType: string, data: any) => {
+    switch (eventType) {
+      case "stream":
+        if (data.type === "text") {
+          setState((prev) => ({
+            ...prev,
+            streamingText: prev.streamingText + (data.text || ""),
+          }));
+        } else if (data.type === "tool_start") {
+          setState((prev) => ({
+            ...prev,
+            isExecutingCode: true,
+            streamingCode: "",
+          }));
+        } else if (data.type === "code") {
+          setState((prev) => ({
+            ...prev,
+            streamingCode: prev.streamingCode + (data.code || ""),
+          }));
+        } else if (data.type === "tool_end") {
+          setState((prev) => ({
+            ...prev,
+            isExecutingCode: false,
+          }));
+        }
+        break;
+
+      case "code_artifact":
+        setState((prev) => ({
+          ...prev,
+          codeArtifacts: [...prev.codeArtifacts, data],
+        }));
+        break;
+
+      case "file":
+        setState((prev) => ({
+          ...prev,
+          generatedFiles: [...prev.generatedFiles, data.url],
+        }));
+        break;
+
+      case "done":
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+        }));
+        break;
+
+      case "error":
+        setState((prev) => ({
+          ...prev,
+          error: data.message,
+          isLoading: false,
+        }));
+        break;
+    }
+  };
+
+  return (
+    <div className="openai-chat">
+      {/* Input */}
+      <div className="input-section">
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="Ask OpenAI to write and execute code..."
+          disabled={state.isLoading}
+        />
+        <button onClick={handleSubmit} disabled={state.isLoading}>
+          {state.isLoading ? "Processing..." : "Send"}
+        </button>
+      </div>
+
+      {/* Code Execution (live) */}
+      {state.isExecutingCode && state.streamingCode && (
+        <div className="code-streaming">
+          <div className="code-header">Executing Code...</div>
+          <pre>
+            <code>{state.streamingCode}</code>
+          </pre>
+        </div>
+      )}
+
+      {/* Code Artifacts (final) */}
+      {state.codeArtifacts.map((artifact, i) => (
+        <div key={i} className="code-artifact">
+          <div className="artifact-header">
+            Python Code (ID: {artifact.id.slice(-8)})
+          </div>
+          <pre>
+            <code>{artifact.code}</code>
+          </pre>
+        </div>
+      ))}
+
+      {/* Text Response */}
+      {state.streamingText && (
+        <div className="text-response">{state.streamingText}</div>
+      )}
+
+      {/* Generated Files (Images) */}
+      {state.generatedFiles.map((url, i) => (
+        <div key={i} className="generated-file">
+          <img src={url} alt={`Generated file ${i + 1}`} />
+        </div>
+      ))}
+
+      {/* Error Display */}
+      {state.error && <div className="error">Error: {state.error}</div>}
+    </div>
+  );
+}
+```
+
+### Server-Sent Events (SSE)
+
+The frontend receives events in this format:
+
+```
+event: stream
+data: {"type":"tool_start","toolName":"code_interpreter"}
+
+event: stream
+data: {"type":"code","code":"import matplotlib"}
+
+event: stream
+data: {"type":"code","code":".pyplot as plt"}
+
+event: stream
+data: {"type":"code_complete","code":"import matplotlib.pyplot as plt\n..."}
+
+event: stream
+data: {"type":"tool_end","toolName":"code_interpreter"}
+
+event: stream
+data: {"type":"text","text":"The plot"}
+
+event: stream
+data: {"type":"text","text":" has been saved."}
+
+event: code_artifact
+data: {"id":"ci_abc123","code":"import matplotlib...","status":"completed"}
+
+event: file
+data: {"url":"/generated/plot.png"}
+
+event: done
+data: {"text":"The plot has been saved.","responseId":"resp_xxx","fileCount":1}
+```
+
+---
+
+## Container Sessions
+
+OpenAI's code interpreter runs in containers. The container ID is returned for reference but unlike Claude, OpenAI doesn't currently support reusing containers across requests through the Responses API.
+
+```typescript
+const result = await executeCodeWithOpenAIStreaming(
+  client,
+  "Create a plot",
+  handleEvent
+);
+
+console.log(result.containerId); // "cntr_abc123..."
+// Note: Container reuse not supported in Responses API
+```
+
+---
+
+## File Downloads
+
+### Server-Side Download
+
+```typescript
+const paths = await downloadGeneratedFiles(result.files, "./output");
+// Returns: ["./output/plot.png", "./output/data.csv"]
+```
+
+### Download URL Structure
+
+OpenAI container files are downloaded from:
+
+```
+https://api.openai.com/v1/containers/{container_id}/files/{file_id}
+```
+
+### Manual Download
+
+```typescript
+async function downloadFile(
+  containerId: string,
+  fileId: string
+): Promise<Buffer> {
+  const response = await fetch(
+    `https://api.openai.com/v1/containers/${containerId}/files/${fileId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Download failed: ${response.status}`);
+  }
+
+  return Buffer.from(await response.arrayBuffer());
+}
+```
+
+### Frontend File Proxy
+
+```typescript
+// app/api/files/[containerId]/[fileId]/route.ts
+export async function GET(
+  req: NextRequest,
+  { params }: { params: { containerId: string; fileId: string } }
+) {
+  const response = await fetch(
+    `https://api.openai.com/v1/containers/${params.containerId}/files/${params.fileId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+    }
+  );
+
+  return new Response(response.body, {
+    headers: {
+      "Content-Type":
+        response.headers.get("Content-Type") || "application/octet-stream",
+    },
+  });
+}
+```
+
+---
+
+## Error Handling
+
+```typescript
+try {
+  const result = await executeCodeWithOpenAIStreaming(
+    client,
+    prompt,
+    handleEvent
+  );
+} catch (error) {
+  if (error instanceof OpenAI.APIError) {
+    switch (error.status) {
+      case 400:
+        console.error("Bad request:", error.message);
+        break;
+      case 401:
+        console.error("Invalid API key");
+        break;
+      case 429:
+        console.error("Rate limited - wait and retry");
+        break;
+      case 500:
+        console.error("OpenAI server error");
+        break;
+    }
+  }
+}
+```
+
+---
+
+## Common Pitfalls
+
+### 1. Text Delta Field Name
+
+In streaming, text content is in `event.delta`, not `event.text`:
+
+```typescript
+// Wrong
+case "response.output_text.delta":
+  if (event.text) { ... }  // undefined!
+
+// Correct
+case "response.output_text.delta":
+  if (event.delta) { ... }  // works!
+```
+
+### 2. Code Delta Field Name
+
+Similarly, code content is in `event.delta`:
+
+```typescript
+// Correct
+case "response.code_interpreter_call_code.delta":
+  const codeDelta = event.delta || event.code || "";
+```
+
+### 3. File Annotations in Streaming
+
+Files are announced via `response.output_text.annotation.added` events, not in the final response only. The module captures these during streaming.
+
+### 4. Multiple Files May Be Generated
+
+The code interpreter can generate multiple files, including:
+- The requested file (e.g., `plot.png`)
+- Additional files with auto-generated names
+
+Both are included in `result.files`.
+
+### 5. Code Interpreter Cost
+
+Code Interpreter costs $0.03 per container session. Each new request creates a new container.
+
+---
+
+## Comparison with Claude API
+
+| Feature | OpenAI | Claude |
+|---------|--------|--------|
+| API | Responses API | Messages API (beta) |
+| Tool Name | `code_interpreter` | `code_execution_20250825` |
+| Container Reuse | Not supported | Supported via `containerId` |
+| Code Artifacts | In `code_interpreter_call.code` | In `text_editor_code_execution` tool input |
+| File Location | `container_file_citation` annotations | `bash_code_execution_output` in tool results |
+| Text Delta Field | `event.delta` | `delta.text` |
+| Cost | $0.03/container | Token-based |
+
+### Key Differences in Implementation
+
+1. **Code Artifacts**:
+   - OpenAI: Available directly in `code_interpreter_call` output item
+   - Claude: Must accumulate `input_json_delta` events and parse JSON
+
+2. **File Discovery**:
+   - OpenAI: Via `container_file_citation` annotations
+   - Claude: Via `bash_code_execution_output` items
+
+3. **Streaming Text**:
+   - OpenAI: `event.delta` in `response.output_text.delta`
+   - Claude: `delta.text` in `content_block_delta`
+
+---
+
+## Complete Example
+
+See `src/test/test-openai.ts` for a complete working example that:
+
+1. Sends a prompt requesting a mathematical plot
+2. Streams the response in real-time
+3. Extracts code artifacts (Python source)
+4. Downloads generated images
+5. Displays all results
+
+Run with:
+
+```bash
+npm run test:openai
+```
+
+---
+
+## Sources
+
+- [OpenAI Streaming Events](https://platform.openai.com/docs/api-reference/responses-streaming/response)
+- [OpenAI Streaming Responses Guide](https://platform.openai.com/docs/guides/streaming-responses)
+- [OpenAI Code Interpreter](https://platform.openai.com/docs/guides/tools-code-interpreter)

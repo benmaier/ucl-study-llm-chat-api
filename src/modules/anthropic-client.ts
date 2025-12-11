@@ -1,0 +1,383 @@
+/**
+ * Anthropic Claude API Module
+ *
+ * Provides functions for interacting with Claude API including:
+ * - Code execution with file generation
+ * - Streaming responses
+ * - File retrieval from code execution
+ */
+
+import Anthropic from "@anthropic-ai/sdk";
+import { writeFileSync } from "fs";
+
+// Types for code execution responses
+export interface CodeExecutionFile {
+  file_id: string;
+  filename?: string;
+}
+
+export interface CodeArtifact {
+  path: string;
+  content: string;
+  command: "create" | "view" | "str_replace";
+}
+
+export interface CodeExecutionResult {
+  text: string;
+  files: CodeExecutionFile[];
+  codeArtifacts: CodeArtifact[];
+  containerId?: string;
+}
+
+export interface StreamEvent {
+  type: string;
+  text?: string;
+  code?: string;
+  toolName?: string;
+}
+
+/**
+ * Create Anthropic client
+ */
+export function createAnthropicClient(): Anthropic {
+  return new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  });
+}
+
+/**
+ * Execute code with Claude's code execution tool (non-streaming)
+ */
+export async function executeCodeWithClaude(
+  client: Anthropic,
+  prompt: string,
+  options?: {
+    model?: string;
+    maxTokens?: number;
+    containerId?: string;
+  }
+): Promise<CodeExecutionResult> {
+  const model = options?.model ?? "claude-sonnet-4-5-20250929";
+  const maxTokens = options?.maxTokens ?? 8192;
+
+  const requestParams: any = {
+    model,
+    betas: ["code-execution-2025-08-25", "files-api-2025-04-14"],
+    max_tokens: maxTokens,
+    messages: [
+      {
+        role: "user",
+        content: prompt,
+      },
+    ],
+    tools: [
+      {
+        type: "code_execution_20250825",
+        name: "code_execution",
+      },
+    ],
+  };
+
+  if (options?.containerId) {
+    requestParams.container = options.containerId;
+  }
+
+  const response = await client.beta.messages.create(requestParams);
+
+  // Extract text, files, and code artifacts from response
+  let text = "";
+  const files: CodeExecutionFile[] = [];
+  const codeArtifacts: CodeArtifact[] = [];
+  let containerId: string | undefined;
+
+  // Get container ID from response
+  if ((response as any).container?.id) {
+    containerId = (response as any).container.id;
+  }
+
+  for (const block of response.content) {
+    if (block.type === "text") {
+      text += block.text;
+    } else if (block.type === "server_tool_use") {
+      // Extract code artifacts from text_editor_code_execution tool calls
+      const toolBlock = block as any;
+      if (toolBlock.name === "text_editor_code_execution") {
+        const input = toolBlock.input;
+        if (input?.command === "create" && input?.path && input?.file_text) {
+          codeArtifacts.push({
+            path: input.path,
+            content: input.file_text,
+            command: "create",
+          });
+        }
+      }
+    } else if (block.type === "bash_code_execution_tool_result") {
+      const result = (block as any).content;
+      // Files are in result.content array with type "bash_code_execution_output"
+      if (result?.type === "bash_code_execution_result" && Array.isArray(result.content)) {
+        for (const item of result.content) {
+          if (item.type === "bash_code_execution_output" && item.file_id) {
+            files.push({
+              file_id: item.file_id,
+              filename: item.filename,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return { text, files, codeArtifacts, containerId };
+}
+
+/**
+ * Execute code with Claude using streaming
+ */
+export async function executeCodeWithClaudeStreaming(
+  client: Anthropic,
+  prompt: string,
+  onEvent: (event: StreamEvent) => void,
+  options?: {
+    model?: string;
+    maxTokens?: number;
+    containerId?: string;
+  }
+): Promise<CodeExecutionResult> {
+  const model = options?.model ?? "claude-sonnet-4-5-20250929";
+  const maxTokens = options?.maxTokens ?? 8192;
+
+  const requestParams: any = {
+    model,
+    betas: ["code-execution-2025-08-25", "files-api-2025-04-14"],
+    max_tokens: maxTokens,
+    messages: [
+      {
+        role: "user",
+        content: prompt,
+      },
+    ],
+    tools: [
+      {
+        type: "code_execution_20250825",
+        name: "code_execution",
+      },
+    ],
+  };
+
+  if (options?.containerId) {
+    requestParams.container = options.containerId;
+  }
+
+  const stream = await client.beta.messages.stream(requestParams);
+
+  let fullText = "";
+  const files: CodeExecutionFile[] = [];
+  const codeArtifacts: CodeArtifact[] = [];
+  let containerId: string | undefined;
+  let currentToolName: string | undefined;
+  let currentToolId: string | undefined;
+  let currentToolInput = "";
+
+  // Map to store accumulated tool inputs by ID
+  const toolInputs: Map<string, { name: string; input: string }> = new Map();
+
+  for await (const event of stream) {
+    // Handle different event types
+    if (event.type === "message_start") {
+      // Check for container in message
+      if ((event as any).message?.container?.id) {
+        containerId = (event as any).message.container.id;
+      }
+    } else if (event.type === "content_block_start") {
+      const block = (event as any).content_block;
+      if (block?.type === "server_tool_use") {
+        currentToolName = block.name;
+        currentToolId = block.id;
+        currentToolInput = "";
+        onEvent({ type: "tool_start", toolName: block.name });
+      }
+    } else if (event.type === "content_block_delta") {
+      const delta = (event as any).delta;
+      if (delta?.type === "text_delta") {
+        fullText += delta.text;
+        onEvent({ type: "text", text: delta.text });
+      } else if (delta?.type === "input_json_delta") {
+        // Accumulate tool input JSON
+        currentToolInput += delta.partial_json || "";
+        onEvent({ type: "tool_input", text: delta.partial_json });
+      }
+    } else if (event.type === "content_block_stop") {
+      if (currentToolName && currentToolId) {
+        // Save accumulated input for this tool
+        toolInputs.set(currentToolId, {
+          name: currentToolName,
+          input: currentToolInput,
+        });
+        onEvent({ type: "tool_end", toolName: currentToolName });
+        currentToolName = undefined;
+        currentToolId = undefined;
+        currentToolInput = "";
+      }
+    }
+  }
+
+  // Parse accumulated tool inputs to extract code artifacts
+  for (const [toolId, tool] of toolInputs) {
+    if (tool.name === "text_editor_code_execution" && tool.input) {
+      try {
+        const input = JSON.parse(tool.input);
+        if (input?.command === "create" && input?.path && input?.file_text) {
+          codeArtifacts.push({
+            path: input.path,
+            content: input.file_text,
+            command: "create",
+          });
+        }
+      } catch (e) {
+        // JSON parse failed, skip this tool
+      }
+    }
+  }
+
+  // Get final message to extract files (code artifacts already extracted from stream)
+  const finalMessage = await stream.finalMessage();
+
+  // Extract container ID from final message
+  if ((finalMessage as any).container?.id) {
+    containerId = (finalMessage as any).container.id;
+  }
+
+  // Extract generated files from final message
+  for (const block of finalMessage.content) {
+    if (block.type === "bash_code_execution_tool_result") {
+      const result = (block as any).content;
+
+      // Files are in result.content array with type "bash_code_execution_output"
+      if (result?.type === "bash_code_execution_result" && Array.isArray(result.content)) {
+        for (const item of result.content) {
+          // Handle bash_code_execution_output type (generated files)
+          if (item.type === "bash_code_execution_output" && item.file_id) {
+            files.push({
+              file_id: item.file_id,
+              filename: item.filename, // May be undefined
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return { text: fullText, files, codeArtifacts, containerId };
+}
+
+/**
+ * Download files generated by code execution
+ */
+export async function downloadGeneratedFiles(
+  client: Anthropic,
+  files: CodeExecutionFile[],
+  outputDir: string = "."
+): Promise<string[]> {
+  const downloadedPaths: string[] = [];
+
+  console.log(`Attempting to download ${files.length} file(s)...`);
+
+  for (const file of files) {
+    console.log(`  File ID: ${file.file_id}, Filename: ${file.filename || "unknown"}`);
+
+    try {
+      // Determine filename - use provided or generate from ID
+      let filename = file.filename;
+      if (!filename) {
+        // Try to infer extension from file_id or default to .bin
+        filename = `file_${file.file_id.slice(-8)}.png`;
+      }
+
+      // Download file content via REST API
+      const url = `https://api.anthropic.com/v1/files/${file.file_id}/content`;
+      console.log(`  Downloading from: ${url}`);
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "x-api-key": process.env.ANTHROPIC_API_KEY || "",
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "files-api-2025-04-14",
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      console.log(`  Downloaded ${buffer.length} bytes`);
+
+      // Save to disk
+      const outputPath = `${outputDir}/${filename}`;
+      writeFileSync(outputPath, buffer);
+      downloadedPaths.push(outputPath);
+
+      console.log(`  Saved to: ${outputPath}`);
+    } catch (error) {
+      console.error(`  Failed to download file ${file.file_id}:`, error);
+    }
+  }
+
+  return downloadedPaths;
+}
+
+/**
+ * Simple chat with Claude (no tools)
+ */
+export async function chatWithClaude(
+  client: Anthropic,
+  message: string,
+  options?: {
+    model?: string;
+    maxTokens?: number;
+    system?: string;
+  }
+): Promise<string> {
+  const response = await client.messages.create({
+    model: options?.model ?? "claude-sonnet-4-5-20250514",
+    max_tokens: options?.maxTokens ?? 1024,
+    system: options?.system,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const textBlock = response.content.find((block) => block.type === "text");
+  return textBlock?.type === "text" ? textBlock.text : "";
+}
+
+/**
+ * Stream a simple chat with Claude
+ */
+export async function streamChatWithClaude(
+  client: Anthropic,
+  message: string,
+  onText: (text: string) => void,
+  options?: {
+    model?: string;
+    maxTokens?: number;
+    system?: string;
+  }
+): Promise<string> {
+  const stream = client.messages.stream({
+    model: options?.model ?? "claude-sonnet-4-5-20250514",
+    max_tokens: options?.maxTokens ?? 1024,
+    system: options?.system,
+    messages: [{ role: "user", content: message }],
+  });
+
+  let fullText = "";
+
+  stream.on("text", (text) => {
+    fullText += text;
+    onText(text);
+  });
+
+  await stream.finalMessage();
+  return fullText;
+}

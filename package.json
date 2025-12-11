@@ -1,0 +1,23 @@
+{
+  "name": "test-native-apis",
+  "version": "1.0.0",
+  "description": "Test native APIs for Claude and OpenAI with code execution",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test:anthropic": "npx tsx src/test/test-anthropic.ts",
+    "test:anthropic:debug": "npx tsx src/test/test-anthropic-debug.ts",
+    "test:openai": "npx tsx src/test/test-openai.ts",
+    "test:all": "npm run test:anthropic && npm run test:openai"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "openai": "^4.77.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
