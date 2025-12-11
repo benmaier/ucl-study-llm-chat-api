@@ -216,7 +216,7 @@ export async function executeCodeWithClaude(
       { type: "text", text: prompt },
       ...options.fileIds.map((id) => ({
         type: "container_upload",
-        source: { type: "file", file_id: id },
+        file_id: id,
       })),
     ];
   }
@@ -312,7 +312,7 @@ export async function executeCodeWithClaudeStreaming(
       { type: "text", text: prompt },
       ...options.fileIds.map((id) => ({
         type: "container_upload",
-        source: { type: "file", file_id: id },
+        file_id: id,
       })),
     ];
   }

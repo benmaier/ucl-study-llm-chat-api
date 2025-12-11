@@ -7,7 +7,9 @@
     "build": "tsc",
     "test:anthropic": "npx tsx src/test/test-anthropic.ts",
     "test:anthropic:debug": "npx tsx src/test/test-anthropic-debug.ts",
+    "test:anthropic:upload": "npx tsx src/test/test-anthropic-file-upload.ts",
     "test:openai": "npx tsx src/test/test-openai.ts",
+    "test:openai:upload": "npx tsx src/test/test-openai-file-upload.ts",
     "test:all": "npm run test:anthropic && npm run test:openai"
   },
   "dependencies": {
