@@ -2,10 +2,13 @@
 
 A TypeScript module for interacting with Claude's API, featuring code execution with streaming support, file generation, and artifact retrieval.
 
+> **Note:** This module uses a [unified interface](#unified-interface) shared with the OpenAI module, allowing your frontend to use either provider interchangeably.
+
 ## Table of Contents
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Unified Interface](#unified-interface)
 - [API Reference](#api-reference)
   - [Types](#types)
   - [Functions](#functions)
@@ -64,8 +67,113 @@ if (result.files.length > 0) {
 // Access code artifacts (Python files created)
 for (const artifact of result.codeArtifacts) {
   console.log(`File: ${artifact.path}`);
-  console.log(artifact.content);
+  console.log(artifact.code);
 }
+```
+
+---
+
+## Unified Interface
+
+This module shares a common interface with the OpenAI module (`src/modules/types.ts`), enabling your frontend to switch between providers without code changes.
+
+### Shared Types
+
+```typescript
+// src/modules/types.ts
+
+interface CodeArtifact {
+  id: string;       // Unique identifier
+  path: string;     // File path (e.g., "plot.py") or "code_interpreter" for OpenAI
+  code: string;     // Full source code
+  language: string; // Programming language (e.g., "python")
+}
+
+interface CodeExecutionFile {
+  file_id: string;
+  filename: string;
+  container_id?: string;  // OpenAI only
+}
+
+interface CodeExecutionResult {
+  text: string;                  // Model's text response
+  files: CodeExecutionFile[];    // Generated files (images, etc.)
+  codeArtifacts: CodeArtifact[]; // Source code files created/executed
+  containerId?: string;          // Container ID for follow-up requests
+}
+
+interface StreamEvent {
+  type: StreamEventType;
+  text?: string;      // Text content (for "text" type)
+  code?: string;      // Code content (for "code" types)
+  toolName?: string;  // Tool name (for "tool_start"/"tool_end")
+}
+
+type StreamEventType =
+  | "text"           // Text response streaming
+  | "tool_start"     // Code execution tool started
+  | "tool_input"     // Tool input streaming (Claude only)
+  | "code"           // Code streaming (OpenAI only)
+  | "code_executing" // Code is being executed
+  | "code_complete"  // Code execution complete
+  | "tool_end";      // Code execution tool ended
+```
+
+### Provider-Agnostic Frontend
+
+Your frontend can work with either provider using the same code:
+
+```typescript
+import type { CodeExecutionResult, StreamEvent } from "./modules/types.js";
+
+// Generic handler works with both providers
+function handleResult(result: CodeExecutionResult) {
+  // Text response
+  console.log(result.text);
+
+  // Code artifacts (same structure for both)
+  for (const artifact of result.codeArtifacts) {
+    console.log(`${artifact.path} (${artifact.language})`);
+    console.log(artifact.code);
+  }
+
+  // Generated files
+  for (const file of result.files) {
+    console.log(`File: ${file.filename} (ID: ${file.file_id})`);
+  }
+}
+
+// Generic event handler
+function handleEvent(event: StreamEvent) {
+  switch (event.type) {
+    case "text":
+      process.stdout.write(event.text || "");
+      break;
+    case "tool_start":
+      console.log(`[${event.toolName} started]`);
+      break;
+    case "tool_end":
+      console.log(`[${event.toolName} completed]`);
+      break;
+  }
+}
+```
+
+### Switching Providers
+
+```typescript
+// Claude
+import { createAnthropicClient, executeCodeWithClaudeStreaming } from "./modules/anthropic-client.js";
+const client = createAnthropicClient();
+const result = await executeCodeWithClaudeStreaming(client, prompt, handleEvent);
+
+// OpenAI - same result type, same event handler
+import { createOpenAIClient, executeCodeWithOpenAIStreaming } from "./modules/openai-client.js";
+const client = createOpenAIClient();
+const result = await executeCodeWithOpenAIStreaming(client, prompt, handleEvent);
+
+// Both return CodeExecutionResult with identical structure
+handleResult(result);
 ```
 
 ---
@@ -80,8 +188,9 @@ Represents a file generated during code execution (images, data files, etc.).
 
 ```typescript
 interface CodeExecutionFile {
-  file_id: string;      // Unique identifier for downloading
-  filename?: string;    // Original filename (may be undefined)
+  file_id: string;       // Unique identifier for downloading
+  filename: string;      // Original filename
+  container_id?: string; // OpenAI only
 }
 ```
 
@@ -91,9 +200,10 @@ Represents source code created by Claude during execution.
 
 ```typescript
 interface CodeArtifact {
-  path: string;                              // File path (e.g., "plot.py")
-  content: string;                           // Full source code
-  command: "create" | "view" | "str_replace"; // Operation type
+  id: string;       // Unique identifier
+  path: string;     // File path (e.g., "plot.py")
+  code: string;     // Full source code
+  language: string; // Programming language (e.g., "python")
 }
 ```
 
@@ -116,11 +226,19 @@ Events emitted during streaming execution.
 
 ```typescript
 interface StreamEvent {
-  type: string;       // Event type (see below)
-  text?: string;      // Text content (for "text" and "tool_input" types)
+  type: StreamEventType;
+  text?: string;      // Text content (for "text" type)
   code?: string;      // Code content
   toolName?: string;  // Tool name (for "tool_start" and "tool_end" types)
 }
+
+type StreamEventType =
+  | "text"           // Text response streaming
+  | "tool_start"     // Code execution tool started
+  | "tool_input"     // Tool input streaming
+  | "code_executing" // Code is being executed
+  | "code_complete"  // Code execution complete
+  | "tool_end";      // Code execution tool ended
 ```
 
 ### Functions

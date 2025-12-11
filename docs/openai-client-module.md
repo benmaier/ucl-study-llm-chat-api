@@ -2,10 +2,13 @@
 
 A TypeScript module for interacting with OpenAI's Responses API, featuring code interpreter with streaming support, file generation, and artifact retrieval.
 
+> **Note:** This module uses a [unified interface](#unified-interface) shared with the Claude module, allowing your frontend to use either provider interchangeably.
+
 ## Table of Contents
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Unified Interface](#unified-interface)
 - [API Reference](#api-reference)
   - [Types](#types)
   - [Functions](#functions)
@@ -64,9 +67,114 @@ if (result.files.length > 0) {
 
 // Access code artifacts (Python code executed)
 for (const artifact of result.codeArtifacts) {
-  console.log(`Code ID: ${artifact.id}`);
+  console.log(`${artifact.path} (${artifact.language})`);
   console.log(artifact.code);
 }
+```
+
+---
+
+## Unified Interface
+
+This module shares a common interface with the Claude module (`src/modules/types.ts`), enabling your frontend to switch between providers without code changes.
+
+### Shared Types
+
+```typescript
+// src/modules/types.ts
+
+interface CodeArtifact {
+  id: string;       // Unique identifier
+  path: string;     // File path (e.g., "plot.py") or "code_interpreter" for OpenAI
+  code: string;     // Full source code
+  language: string; // Programming language (e.g., "python")
+}
+
+interface CodeExecutionFile {
+  file_id: string;
+  filename: string;
+  container_id?: string;  // OpenAI only
+}
+
+interface CodeExecutionResult {
+  text: string;                  // Model's text response
+  files: CodeExecutionFile[];    // Generated files (images, etc.)
+  codeArtifacts: CodeArtifact[]; // Source code files created/executed
+  containerId?: string;          // Container ID for follow-up requests
+}
+
+interface StreamEvent {
+  type: StreamEventType;
+  text?: string;      // Text content (for "text" type)
+  code?: string;      // Code content (for "code" types)
+  toolName?: string;  // Tool name (for "tool_start"/"tool_end")
+}
+
+type StreamEventType =
+  | "text"           // Text response streaming
+  | "tool_start"     // Code execution tool started
+  | "tool_input"     // Tool input streaming (Claude only)
+  | "code"           // Code streaming (OpenAI only)
+  | "code_executing" // Code is being executed
+  | "code_complete"  // Code execution complete
+  | "tool_end";      // Code execution tool ended
+```
+
+### Provider-Agnostic Frontend
+
+Your frontend can work with either provider using the same code:
+
+```typescript
+import type { CodeExecutionResult, StreamEvent } from "./modules/types.js";
+
+// Generic handler works with both providers
+function handleResult(result: CodeExecutionResult) {
+  // Text response
+  console.log(result.text);
+
+  // Code artifacts (same structure for both)
+  for (const artifact of result.codeArtifacts) {
+    console.log(`${artifact.path} (${artifact.language})`);
+    console.log(artifact.code);
+  }
+
+  // Generated files
+  for (const file of result.files) {
+    console.log(`File: ${file.filename} (ID: ${file.file_id})`);
+  }
+}
+
+// Generic event handler
+function handleEvent(event: StreamEvent) {
+  switch (event.type) {
+    case "text":
+      process.stdout.write(event.text || "");
+      break;
+    case "tool_start":
+      console.log(`[${event.toolName} started]`);
+      break;
+    case "tool_end":
+      console.log(`[${event.toolName} completed]`);
+      break;
+  }
+}
+```
+
+### Switching Providers
+
+```typescript
+// OpenAI
+import { createOpenAIClient, executeCodeWithOpenAIStreaming } from "./modules/openai-client.js";
+const client = createOpenAIClient();
+const result = await executeCodeWithOpenAIStreaming(client, prompt, handleEvent);
+
+// Claude - same result type, same event handler
+import { createAnthropicClient, executeCodeWithClaudeStreaming } from "./modules/anthropic-client.js";
+const client = createAnthropicClient();
+const result = await executeCodeWithClaudeStreaming(client, prompt, handleEvent);
+
+// Both return CodeExecutionResult with identical structure
+handleResult(result);
 ```
 
 ---
@@ -82,8 +190,8 @@ Represents a file generated during code execution (images, data files, etc.).
 ```typescript
 interface CodeExecutionFile {
   file_id: string;       // Unique identifier for downloading
-  container_id: string;  // Container where file was created
   filename: string;      // Original filename
+  container_id?: string; // Container where file was created (OpenAI only)
 }
 ```
 
@@ -93,9 +201,10 @@ Represents Python code executed by the code interpreter.
 
 ```typescript
 interface CodeArtifact {
-  id: string;     // Unique identifier for the code execution call
-  code: string;   // Full Python source code that was executed
-  status: string; // Execution status ("completed", "in_progress", etc.)
+  id: string;       // Unique identifier
+  path: string;     // "code_interpreter" for OpenAI
+  code: string;     // Full Python source code that was executed
+  language: string; // Programming language (e.g., "python")
 }
 ```
 
@@ -108,8 +217,7 @@ interface CodeExecutionResult {
   text: string;                  // Model's text response
   files: CodeExecutionFile[];    // Generated files (images, etc.)
   codeArtifacts: CodeArtifact[]; // Python code that was executed
-  containerId?: string;          // Container ID for follow-up requests
-  responseId: string;            // Response ID for reference
+  containerId?: string;          // Container ID for reference
 }
 ```
 
@@ -119,11 +227,19 @@ Events emitted during streaming execution.
 
 ```typescript
 interface StreamEvent {
-  type: string;       // Event type (see below)
+  type: StreamEventType;
   text?: string;      // Text content (for "text" type)
   code?: string;      // Code content (for "code" and "code_complete" types)
   toolName?: string;  // Tool name (for "tool_start" and "tool_end" types)
 }
+
+type StreamEventType =
+  | "text"           // Text response streaming
+  | "tool_start"     // Code execution tool started
+  | "code"           // Code streaming
+  | "code_executing" // Code is being executed
+  | "code_complete"  // Code execution complete
+  | "tool_end";      // Code execution tool ended
 ```
 
 ### Functions
