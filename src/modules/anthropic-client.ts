@@ -10,6 +10,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { writeFileSync } from "fs";
 import {
+  UploadedFile,
   CodeExecutionFile,
   CodeArtifact,
   CodeExecutionResult,
@@ -20,6 +21,7 @@ import {
 
 // Re-export types for convenience
 export type {
+  UploadedFile,
   CodeExecutionFile,
   CodeArtifact,
   CodeExecutionResult,
@@ -61,6 +63,142 @@ export function createAnthropicClient(): Anthropic {
 }
 
 /**
+ * Upload a file to Claude's Files API for use in code execution
+ */
+export async function uploadFile(
+  client: Anthropic,
+  filePath: string,
+  mimeType?: string
+): Promise<UploadedFile> {
+  const fs = await import("fs");
+  const path = await import("path");
+
+  const filename = path.basename(filePath);
+  const fileBuffer = fs.readFileSync(filePath);
+
+  // Infer mime type if not provided
+  const detectedMimeType = mimeType || inferMimeType(filename);
+
+  // Use REST API for file upload
+  const formData = new FormData();
+  formData.append("file", new Blob([fileBuffer], { type: detectedMimeType }), filename);
+
+  const response = await fetch("https://api.anthropic.com/v1/files", {
+    method: "POST",
+    headers: {
+      "x-api-key": process.env.ANTHROPIC_API_KEY || "",
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "files-api-2025-04-14",
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`File upload failed: ${response.status} - ${errorText}`);
+  }
+
+  const result = await response.json();
+
+  return {
+    file_id: result.id,
+    filename: result.filename,
+    mime_type: result.mime_type,
+    size_bytes: result.size_bytes,
+  };
+}
+
+/**
+ * Upload a file from a Buffer
+ */
+export async function uploadFileFromBuffer(
+  client: Anthropic,
+  buffer: Buffer,
+  filename: string,
+  mimeType?: string
+): Promise<UploadedFile> {
+  const detectedMimeType = mimeType || inferMimeType(filename);
+
+  // Convert Buffer to ArrayBuffer for Blob compatibility
+  const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+
+  const formData = new FormData();
+  formData.append("file", new Blob([arrayBuffer], { type: detectedMimeType }), filename);
+
+  const response = await fetch("https://api.anthropic.com/v1/files", {
+    method: "POST",
+    headers: {
+      "x-api-key": process.env.ANTHROPIC_API_KEY || "",
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "files-api-2025-04-14",
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`File upload failed: ${response.status} - ${errorText}`);
+  }
+
+  const result = await response.json();
+
+  return {
+    file_id: result.id,
+    filename: result.filename,
+    mime_type: result.mime_type,
+    size_bytes: result.size_bytes,
+  };
+}
+
+/**
+ * Delete an uploaded file
+ */
+export async function deleteFile(
+  client: Anthropic,
+  fileId: string
+): Promise<void> {
+  const response = await fetch(`https://api.anthropic.com/v1/files/${fileId}`, {
+    method: "DELETE",
+    headers: {
+      "x-api-key": process.env.ANTHROPIC_API_KEY || "",
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "files-api-2025-04-14",
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`File deletion failed: ${response.status} - ${errorText}`);
+  }
+}
+
+/**
+ * Infer MIME type from filename
+ */
+function inferMimeType(filename: string): string {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  const mimeTypes: Record<string, string> = {
+    csv: "text/csv",
+    json: "application/json",
+    txt: "text/plain",
+    md: "text/markdown",
+    pdf: "application/pdf",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    xls: "application/vnd.ms-excel",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    py: "text/x-python",
+    js: "text/javascript",
+    ts: "text/typescript",
+  };
+  return mimeTypes[ext || ""] || "application/octet-stream";
+}
+
+/**
  * Execute code with Claude's code execution tool (non-streaming)
  */
 export async function executeCodeWithClaude(
@@ -71,6 +209,18 @@ export async function executeCodeWithClaude(
   const model = options?.model ?? "claude-sonnet-4-5-20250929";
   const maxTokens = options?.maxTokens ?? 8192;
 
+  // Build message content - include file references if fileIds provided
+  let messageContent: any = prompt;
+  if (options?.fileIds?.length) {
+    messageContent = [
+      { type: "text", text: prompt },
+      ...options.fileIds.map((id) => ({
+        type: "container_upload",
+        source: { type: "file", file_id: id },
+      })),
+    ];
+  }
+
   const requestParams: any = {
     model,
     betas: ["code-execution-2025-08-25", "files-api-2025-04-14"],
@@ -78,7 +228,7 @@ export async function executeCodeWithClaude(
     messages: [
       {
         role: "user",
-        content: prompt,
+        content: messageContent,
       },
     ],
     tools: [
@@ -155,6 +305,18 @@ export async function executeCodeWithClaudeStreaming(
   const model = options?.model ?? "claude-sonnet-4-5-20250929";
   const maxTokens = options?.maxTokens ?? 8192;
 
+  // Build message content - include file references if fileIds provided
+  let messageContent: any = prompt;
+  if (options?.fileIds?.length) {
+    messageContent = [
+      { type: "text", text: prompt },
+      ...options.fileIds.map((id) => ({
+        type: "container_upload",
+        source: { type: "file", file_id: id },
+      })),
+    ];
+  }
+
   const requestParams: any = {
     model,
     betas: ["code-execution-2025-08-25", "files-api-2025-04-14"],
@@ -162,7 +324,7 @@ export async function executeCodeWithClaudeStreaming(
     messages: [
       {
         role: "user",
-        content: prompt,
+        content: messageContent,
       },
     ],
     tools: [

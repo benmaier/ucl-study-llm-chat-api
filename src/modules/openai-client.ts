@@ -10,6 +10,7 @@
 import OpenAI from "openai";
 import { writeFileSync } from "fs";
 import {
+  UploadedFile,
   CodeExecutionFile,
   CodeArtifact,
   CodeExecutionResult,
@@ -20,6 +21,7 @@ import {
 
 // Re-export types for convenience
 export type {
+  UploadedFile,
   CodeExecutionFile,
   CodeArtifact,
   CodeExecutionResult,
@@ -38,6 +40,167 @@ export function createOpenAIClient(): OpenAI {
 }
 
 /**
+ * Create a container for file uploads and code execution
+ */
+export async function createContainer(): Promise<string> {
+  const response = await fetch("https://api.openai.com/v1/containers", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: `container_${Date.now()}`,
+      expires_after: { anchor: "last_active_at", days: 1 },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Container creation failed: ${response.status} - ${errorText}`);
+  }
+
+  const result = await response.json();
+  return result.id;
+}
+
+/**
+ * Upload a file to a container for use in code execution
+ */
+export async function uploadFile(
+  filePath: string,
+  containerId: string,
+  mimeType?: string
+): Promise<UploadedFile> {
+  const fs = await import("fs");
+  const path = await import("path");
+
+  const filename = path.basename(filePath);
+  const fileBuffer = fs.readFileSync(filePath);
+  const detectedMimeType = mimeType || inferMimeType(filename);
+
+  const formData = new FormData();
+  formData.append("file", new Blob([fileBuffer], { type: detectedMimeType }), filename);
+
+  const response = await fetch(
+    `https://api.openai.com/v1/containers/${containerId}/files`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: formData,
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`File upload failed: ${response.status} - ${errorText}`);
+  }
+
+  const result = await response.json();
+
+  return {
+    file_id: result.id,
+    filename: result.name || filename,
+    mime_type: detectedMimeType,
+    size_bytes: result.bytes || fileBuffer.length,
+  };
+}
+
+/**
+ * Upload a file from a Buffer to a container
+ */
+export async function uploadFileFromBuffer(
+  buffer: Buffer,
+  filename: string,
+  containerId: string,
+  mimeType?: string
+): Promise<UploadedFile> {
+  const detectedMimeType = mimeType || inferMimeType(filename);
+
+  // Convert Buffer to ArrayBuffer for Blob compatibility
+  const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+
+  const formData = new FormData();
+  formData.append("file", new Blob([arrayBuffer], { type: detectedMimeType }), filename);
+
+  const response = await fetch(
+    `https://api.openai.com/v1/containers/${containerId}/files`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: formData,
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`File upload failed: ${response.status} - ${errorText}`);
+  }
+
+  const result = await response.json();
+
+  return {
+    file_id: result.id,
+    filename: result.name || filename,
+    mime_type: detectedMimeType,
+    size_bytes: result.bytes || buffer.length,
+  };
+}
+
+/**
+ * Delete a file from a container
+ */
+export async function deleteFile(
+  fileId: string,
+  containerId: string
+): Promise<void> {
+  const response = await fetch(
+    `https://api.openai.com/v1/containers/${containerId}/files/${fileId}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`File deletion failed: ${response.status} - ${errorText}`);
+  }
+}
+
+/**
+ * Infer MIME type from filename
+ */
+function inferMimeType(filename: string): string {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  const mimeTypes: Record<string, string> = {
+    csv: "text/csv",
+    json: "application/json",
+    txt: "text/plain",
+    md: "text/markdown",
+    pdf: "application/pdf",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    xls: "application/vnd.ms-excel",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    py: "text/x-python",
+    js: "text/javascript",
+    ts: "text/typescript",
+  };
+  return mimeTypes[ext || ""] || "application/octet-stream";
+}
+
+/**
  * Execute code with OpenAI's code interpreter (non-streaming)
  */
 export async function executeCodeWithOpenAI(
@@ -47,15 +210,24 @@ export async function executeCodeWithOpenAI(
 ): Promise<CodeExecutionResult> {
   const model = options?.model ?? "gpt-4o";
 
+  // Build container configuration - include file_ids if provided
+  const containerConfig: any = options?.containerId
+    ? { type: "container", container_id: options.containerId }
+    : { type: "auto" };
+
+  // If fileIds are provided, they need to be in the container with a specific container_id
+  // OpenAI requires files to be uploaded to a container first, then referenced via container_id
+  if (options?.fileIds?.length && options?.containerId) {
+    containerConfig.file_ids = options.fileIds;
+  }
+
   const response = await client.responses.create({
     model,
     input: prompt,
     tools: [
       {
         type: "code_interpreter",
-        container: {
-          type: "auto",
-        },
+        container: containerConfig,
       },
     ],
   });
@@ -130,15 +302,23 @@ export async function executeCodeWithOpenAIStreaming(
 ): Promise<CodeExecutionResult> {
   const model = options?.model ?? "gpt-4o";
 
+  // Build container configuration - include file_ids if provided
+  const containerConfig: any = options?.containerId
+    ? { type: "container", container_id: options.containerId }
+    : { type: "auto" };
+
+  // If fileIds are provided, they need to be in the container with a specific container_id
+  if (options?.fileIds?.length && options?.containerId) {
+    containerConfig.file_ids = options.fileIds;
+  }
+
   const stream = await client.responses.create({
     model,
     input: prompt,
     tools: [
       {
         type: "code_interpreter",
-        container: {
-          type: "auto",
-        },
+        container: containerConfig,
       },
     ],
     stream: true,

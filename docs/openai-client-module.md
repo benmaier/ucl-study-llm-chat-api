@@ -12,6 +12,7 @@ A TypeScript module for interacting with OpenAI's Responses API, featuring code 
 - [API Reference](#api-reference)
   - [Types](#types)
   - [Functions](#functions)
+- [File Upload](#file-upload)
 - [Streaming Events](#streaming-events)
 - [Frontend Integration](#frontend-integration)
   - [Next.js API Route](#nextjs-api-route)
@@ -252,6 +253,50 @@ Creates an OpenAI client using the `OPENAI_API_KEY` environment variable.
 function createOpenAIClient(): OpenAI
 ```
 
+#### `createContainer()`
+
+Create a container for file uploads and code execution.
+
+```typescript
+async function createContainer(): Promise<string>  // Returns container ID
+```
+
+#### `uploadFile()`
+
+Upload a file to a container for use in code execution.
+
+```typescript
+async function uploadFile(
+  filePath: string,
+  containerId: string,
+  mimeType?: string
+): Promise<UploadedFile>
+```
+
+#### `uploadFileFromBuffer()`
+
+Upload a file from a Buffer to a container.
+
+```typescript
+async function uploadFileFromBuffer(
+  buffer: Buffer,
+  filename: string,
+  containerId: string,
+  mimeType?: string
+): Promise<UploadedFile>
+```
+
+#### `deleteFile()`
+
+Delete a file from a container.
+
+```typescript
+async function deleteFile(
+  fileId: string,
+  containerId: string
+): Promise<void>
+```
+
 #### `executeCodeWithOpenAI()`
 
 Execute code with OpenAI's code interpreter (non-streaming).
@@ -261,7 +306,9 @@ async function executeCodeWithOpenAI(
   client: OpenAI,
   prompt: string,
   options?: {
-    model?: string;  // Default: "gpt-4o"
+    model?: string;       // Default: "gpt-4o"
+    containerId?: string; // Container with uploaded files
+    fileIds?: string[];   // File IDs to make available (requires containerId)
   }
 ): Promise<CodeExecutionResult>
 ```
@@ -276,7 +323,9 @@ async function executeCodeWithOpenAIStreaming(
   prompt: string,
   onEvent: (event: StreamEvent) => void,
   options?: {
-    model?: string;  // Default: "gpt-4o"
+    model?: string;       // Default: "gpt-4o"
+    containerId?: string; // Container with uploaded files
+    fileIds?: string[];   // File IDs to make available (requires containerId)
   }
 ): Promise<CodeExecutionResult>
 ```
@@ -322,6 +371,119 @@ async function streamChatWithOpenAI(
   }
 ): Promise<string>
 ```
+
+---
+
+## File Upload
+
+Upload files to OpenAI containers and reference them in code execution. This requires first creating a container, then uploading files to it.
+
+### Basic File Upload
+
+```typescript
+import {
+  createOpenAIClient,
+  createContainer,
+  uploadFile,
+  executeCodeWithOpenAI,
+  deleteFile,
+} from "./modules/openai-client.js";
+
+const client = createOpenAIClient();
+
+// 1. Create a container first
+const containerId = await createContainer();
+console.log(`Created container: ${containerId}`);
+
+// 2. Upload a CSV file to the container
+const uploaded = await uploadFile("./data.csv", containerId);
+console.log(`Uploaded: ${uploaded.filename} (${uploaded.file_id})`);
+
+// 3. Use the file in code execution
+const result = await executeCodeWithOpenAI(
+  client,
+  "Analyze the uploaded CSV file and create a summary chart",
+  { containerId, fileIds: [uploaded.file_id] }
+);
+
+// 4. Clean up when done
+await deleteFile(uploaded.file_id, containerId);
+```
+
+### Upload from Buffer
+
+```typescript
+import { uploadFileFromBuffer } from "./modules/openai-client.js";
+
+// Create data in memory
+const csvData = "name,value\nA,10\nB,20\nC,30";
+const buffer = Buffer.from(csvData, "utf-8");
+
+// Upload the buffer to a container
+const uploaded = await uploadFileFromBuffer(
+  buffer,
+  "data.csv",
+  containerId,
+  "text/csv"
+);
+
+// Use in code execution
+const result = await executeCodeWithOpenAI(
+  client,
+  "Plot this data as a bar chart",
+  { containerId, fileIds: [uploaded.file_id] }
+);
+```
+
+### Multiple Files
+
+```typescript
+// Create container
+const containerId = await createContainer();
+
+// Upload multiple files to the same container
+const file1 = await uploadFile("./sales_2023.csv", containerId);
+const file2 = await uploadFile("./sales_2024.csv", containerId);
+
+// Reference all files in execution
+const result = await executeCodeWithOpenAI(
+  client,
+  "Compare the two sales datasets and create a visualization",
+  { containerId, fileIds: [file1.file_id, file2.file_id] }
+);
+```
+
+### File Access in Code Interpreter
+
+Uploaded files are available at `/mnt/data/` in the code interpreter environment:
+
+```python
+# In the code interpreter, files are at:
+import pandas as pd
+df = pd.read_csv('/mnt/data/data.csv')
+```
+
+### Important Notes
+
+1. **Container Required**: Unlike Claude, OpenAI requires you to create a container first before uploading files.
+2. **Container Cost**: Each container session costs $0.03.
+3. **Container Expiration**: Containers expire after a period of inactivity (configurable, default 1 day).
+4. **File Location**: Uploaded files appear at `/mnt/data/` in the code interpreter.
+
+### Supported File Types
+
+The module automatically infers MIME types for common file extensions:
+
+| Extension | MIME Type |
+|-----------|-----------|
+| .csv | text/csv |
+| .json | application/json |
+| .txt | text/plain |
+| .pdf | application/pdf |
+| .png | image/png |
+| .jpg, .jpeg | image/jpeg |
+| .xlsx | application/vnd.openxmlformats-officedocument.spreadsheetml.sheet |
+| .py | text/x-python |
 
 ---
 

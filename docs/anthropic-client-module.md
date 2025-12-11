@@ -12,6 +12,7 @@ A TypeScript module for interacting with Claude's API, featuring code execution 
 - [API Reference](#api-reference)
   - [Types](#types)
   - [Functions](#functions)
+- [File Upload](#file-upload)
 - [Streaming Events](#streaming-events)
 - [Frontend Integration](#frontend-integration)
   - [Next.js API Route](#nextjs-api-route)
@@ -251,6 +252,42 @@ Creates an Anthropic client using the `ANTHROPIC_API_KEY` environment variable.
 function createAnthropicClient(): Anthropic
 ```
 
+#### `uploadFile()`
+
+Upload a file to Claude's Files API for use in code execution.
+
+```typescript
+async function uploadFile(
+  client: Anthropic,
+  filePath: string,
+  mimeType?: string
+): Promise<UploadedFile>
+```
+
+#### `uploadFileFromBuffer()`
+
+Upload a file from a Buffer (useful for in-memory data).
+
+```typescript
+async function uploadFileFromBuffer(
+  client: Anthropic,
+  buffer: Buffer,
+  filename: string,
+  mimeType?: string
+): Promise<UploadedFile>
+```
+
+#### `deleteFile()`
+
+Delete an uploaded file from Claude's Files API.
+
+```typescript
+async function deleteFile(
+  client: Anthropic,
+  fileId: string
+): Promise<void>
+```
+
 #### `executeCodeWithClaude()`
 
 Execute code with Claude's code execution tool (non-streaming).
@@ -263,6 +300,7 @@ async function executeCodeWithClaude(
     model?: string;        // Default: "claude-sonnet-4-5-20250929"
     maxTokens?: number;    // Default: 8192
     containerId?: string;  // For continuing in same container
+    fileIds?: string[];    // File IDs to make available for code execution
   }
 ): Promise<CodeExecutionResult>
 ```
@@ -280,6 +318,7 @@ async function executeCodeWithClaudeStreaming(
     model?: string;        // Default: "claude-sonnet-4-5-20250929"
     maxTokens?: number;    // Default: 8192
     containerId?: string;  // For continuing in same container
+    fileIds?: string[];    // File IDs to make available for code execution
   }
 ): Promise<CodeExecutionResult>
 ```
@@ -327,6 +366,100 @@ async function streamChatWithClaude(
     system?: string;
   }
 ): Promise<string>
+```
+
+---
+
+## File Upload
+
+Upload files to Claude's Files API and reference them in code execution. This allows Claude to analyze, process, or transform your files.
+
+### Basic File Upload
+
+```typescript
+import {
+  createAnthropicClient,
+  uploadFile,
+  executeCodeWithClaude,
+  deleteFile,
+} from "./modules/anthropic-client.js";
+
+const client = createAnthropicClient();
+
+// Upload a CSV file
+const uploaded = await uploadFile(client, "./data.csv");
+console.log(`Uploaded: ${uploaded.filename} (${uploaded.file_id})`);
+
+// Use the file in code execution
+const result = await executeCodeWithClaude(
+  client,
+  "Analyze the uploaded CSV file and create a summary chart",
+  { fileIds: [uploaded.file_id] }
+);
+
+// Clean up when done
+await deleteFile(client, uploaded.file_id);
+```
+
+### Upload from Buffer
+
+```typescript
+import { uploadFileFromBuffer } from "./modules/anthropic-client.js";
+
+// Create data in memory
+const csvData = "name,value\nA,10\nB,20\nC,30";
+const buffer = Buffer.from(csvData, "utf-8");
+
+// Upload the buffer
+const uploaded = await uploadFileFromBuffer(
+  client,
+  buffer,
+  "data.csv",
+  "text/csv"
+);
+
+// Use in code execution
+const result = await executeCodeWithClaude(
+  client,
+  "Plot this data as a bar chart",
+  { fileIds: [uploaded.file_id] }
+);
+```
+
+### Multiple Files
+
+```typescript
+// Upload multiple files
+const file1 = await uploadFile(client, "./sales_2023.csv");
+const file2 = await uploadFile(client, "./sales_2024.csv");
+
+// Reference all files in execution
+const result = await executeCodeWithClaude(
+  client,
+  "Compare the two sales datasets and create a visualization",
+  { fileIds: [file1.file_id, file2.file_id] }
+);
+```
+
+### Supported File Types
+
+The module automatically infers MIME types for common file extensions:
+
+| Extension | MIME Type |
+|-----------|-----------|
+| .csv | text/csv |
+| .json | application/json |
+| .txt | text/plain |
+| .pdf | application/pdf |
+| .png | image/png |
+| .jpg, .jpeg | image/jpeg |
+| .xlsx | application/vnd.openxmlformats-officedocument.spreadsheetml.sheet |
+| .py | text/x-python |
+
+For other types, specify the MIME type explicitly:
+
+```typescript
+const uploaded = await uploadFile(client, "./custom.data", "application/octet-stream");
 ```
 
 ---

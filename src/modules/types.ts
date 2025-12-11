@@ -6,6 +6,16 @@
  */
 
 /**
+ * Represents an uploaded file that can be referenced in code execution
+ */
+export interface UploadedFile {
+  file_id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+}
+
+/**
  * Represents a file generated during code execution (images, data files, etc.)
  */
 export interface CodeExecutionFile {
@@ -63,6 +73,7 @@ export interface CodeExecutionOptions {
   model?: string;
   maxTokens?: number;
   containerId?: string; // For continuing in same container (Claude only)
+  fileIds?: string[];   // File IDs to make available for code execution
 }
 
 /**

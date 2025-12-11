@@ -11,6 +11,9 @@ export * from "./modules/types.js";
 // Export Anthropic client functions
 export {
   createAnthropicClient,
+  uploadFile as uploadClaudeFile,
+  uploadFileFromBuffer as uploadClaudeFileFromBuffer,
+  deleteFile as deleteClaudeFile,
   executeCodeWithClaude,
   executeCodeWithClaudeStreaming,
   downloadGeneratedFiles as downloadClaudeFiles,
@@ -21,6 +24,10 @@ export {
 // Export OpenAI client functions
 export {
   createOpenAIClient,
+  createContainer as createOpenAIContainer,
+  uploadFile as uploadOpenAIFile,
+  uploadFileFromBuffer as uploadOpenAIFileFromBuffer,
+  deleteFile as deleteOpenAIFile,
   executeCodeWithOpenAI,
   executeCodeWithOpenAIStreaming,
   downloadGeneratedFiles as downloadOpenAIFiles,
