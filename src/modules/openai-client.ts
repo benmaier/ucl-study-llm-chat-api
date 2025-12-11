@@ -9,34 +9,24 @@
 
 import OpenAI from "openai";
 import { writeFileSync } from "fs";
+import {
+  CodeExecutionFile,
+  CodeArtifact,
+  CodeExecutionResult,
+  StreamEvent,
+  CodeExecutionOptions,
+  ChatOptions,
+} from "./types.js";
 
-// Types for code execution responses
-export interface CodeExecutionFile {
-  file_id: string;
-  container_id: string;
-  filename: string;
-}
-
-export interface CodeArtifact {
-  id: string;
-  code: string;
-  status: string;
-}
-
-export interface CodeExecutionResult {
-  text: string;
-  files: CodeExecutionFile[];
-  codeArtifacts: CodeArtifact[];
-  containerId?: string;
-  responseId: string;
-}
-
-export interface StreamEvent {
-  type: string;
-  text?: string;
-  code?: string;
-  toolName?: string;
-}
+// Re-export types for convenience
+export type {
+  CodeExecutionFile,
+  CodeArtifact,
+  CodeExecutionResult,
+  StreamEvent,
+  CodeExecutionOptions,
+  ChatOptions,
+} from "./types.js";
 
 /**
  * Create OpenAI client
@@ -53,9 +43,7 @@ export function createOpenAIClient(): OpenAI {
 export async function executeCodeWithOpenAI(
   client: OpenAI,
   prompt: string,
-  options?: {
-    model?: string;
-  }
+  options?: CodeExecutionOptions
 ): Promise<CodeExecutionResult> {
   const model = options?.model ?? "gpt-4o";
 
@@ -87,8 +75,9 @@ export async function executeCodeWithOpenAI(
       if (item.code) {
         codeArtifacts.push({
           id: item.id,
+          path: "code_interpreter",
           code: item.code,
-          status: item.status || "completed",
+          language: "python",
         });
       }
       // Get container ID
@@ -127,7 +116,6 @@ export async function executeCodeWithOpenAI(
     files,
     codeArtifacts,
     containerId,
-    responseId: response.id,
   };
 }
 
@@ -138,9 +126,7 @@ export async function executeCodeWithOpenAIStreaming(
   client: OpenAI,
   prompt: string,
   onEvent: (event: StreamEvent) => void,
-  options?: {
-    model?: string;
-  }
+  options?: CodeExecutionOptions
 ): Promise<CodeExecutionResult> {
   const model = options?.model ?? "gpt-4o";
 
@@ -163,7 +149,6 @@ export async function executeCodeWithOpenAIStreaming(
   const files: CodeExecutionFile[] = [];
   const codeArtifacts: CodeArtifact[] = [];
   let containerId: string | undefined;
-  let responseId = "";
   let fullResponse: any = null;
   let currentCodeInterpreterId: string | undefined;
 
@@ -172,7 +157,7 @@ export async function executeCodeWithOpenAIStreaming(
 
     switch (eventType) {
       case "response.created":
-        responseId = event.response?.id || "";
+        // Response created, nothing to capture for unified interface
         break;
 
       case "response.output_item.added":
@@ -247,8 +232,9 @@ export async function executeCodeWithOpenAIStreaming(
         if (item.code) {
           codeArtifacts.push({
             id: item.id,
+            path: "code_interpreter",
             code: item.code,
-            status: item.status || "completed",
+            language: "python",
           });
         }
         // Get container ID if not already set
@@ -282,7 +268,6 @@ export async function executeCodeWithOpenAIStreaming(
     files,
     codeArtifacts,
     containerId,
-    responseId,
   };
 }
 
@@ -330,10 +315,7 @@ export async function downloadGeneratedFiles(
 export async function chatWithOpenAI(
   client: OpenAI,
   message: string,
-  options?: {
-    model?: string;
-    system?: string;
-  }
+  options?: ChatOptions
 ): Promise<string> {
   const messages: any[] = [];
 
@@ -357,10 +339,7 @@ export async function streamChatWithOpenAI(
   client: OpenAI,
   message: string,
   onText: (text: string) => void,
-  options?: {
-    model?: string;
-    system?: string;
-  }
+  options?: ChatOptions
 ): Promise<string> {
   const messages: any[] = [];
 

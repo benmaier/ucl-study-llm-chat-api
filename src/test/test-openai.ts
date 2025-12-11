@@ -14,7 +14,6 @@ import {
   executeCodeWithOpenAIStreaming,
   downloadGeneratedFiles,
   StreamEvent,
-  CodeArtifact,
 } from "../modules/openai-client.js";
 
 const TEST_PROMPT = `
@@ -82,11 +81,6 @@ async function main() {
     console.log("\n\n" + "-".repeat(60));
     console.log(`\nExecution completed in ${duration}s`);
 
-    // Show response info
-    if (result.responseId) {
-      console.log(`Response ID: ${result.responseId}`);
-    }
-
     // Show container info
     if (result.containerId) {
       console.log(`Container ID: ${result.containerId}`);
@@ -96,7 +90,7 @@ async function main() {
     if (result.codeArtifacts.length > 0) {
       console.log(`\nCode artifacts: ${result.codeArtifacts.length}`);
       for (const artifact of result.codeArtifacts) {
-        console.log(`\n--- Code (id: ${artifact.id.slice(-20)}) ---`);
+        console.log(`\n--- ${artifact.path} (${artifact.language}) ---`);
         console.log(artifact.code);
         console.log("--- end ---");
       }

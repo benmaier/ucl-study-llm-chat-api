@@ -33,8 +33,8 @@ async function main() {
 
   if (result.codeArtifacts.length > 0) {
     for (const artifact of result.codeArtifacts) {
-      console.log(`\nCode artifact: ${artifact.path}`);
-      console.log(artifact.content);
+      console.log(`\nCode artifact: ${artifact.path} (${artifact.language})`);
+      console.log(artifact.code);
     }
   } else {
     console.log("\nNo code artifacts found. This is unexpected!");

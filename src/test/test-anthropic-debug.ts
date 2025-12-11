@@ -36,11 +36,11 @@ async function main() {
       ],
       tools: [
         {
-          type: "code_execution_20250825",
+          type: "code_execution_20250825" as any,
           name: "code_execution",
         },
       ],
-    });
+    } as any);
 
     console.log("Response received!\n");
 
@@ -69,7 +69,8 @@ async function main() {
     const files: { file_id: string; filename?: string }[] = [];
 
     for (const block of response.content) {
-      if (block.type === "bash_code_execution_tool_result") {
+      const blockType = (block as any).type;
+      if (blockType === "bash_code_execution_tool_result") {
         console.log("Found bash_code_execution_tool_result block");
         const result = (block as any).content;
         console.log("Result type:", result?.type);

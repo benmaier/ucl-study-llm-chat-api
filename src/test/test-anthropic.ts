@@ -84,8 +84,8 @@ async function main() {
     if (result.codeArtifacts.length > 0) {
       console.log(`\nCode artifacts: ${result.codeArtifacts.length}`);
       for (const artifact of result.codeArtifacts) {
-        console.log(`\n--- ${artifact.path} ---`);
-        console.log(artifact.content);
+        console.log(`\n--- ${artifact.path} (${artifact.language}) ---`);
+        console.log(artifact.code);
         console.log("--- end ---");
       }
     }

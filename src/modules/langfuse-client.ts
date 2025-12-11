@@ -56,7 +56,7 @@ export class LangfuseClient {
       publicKey: config?.publicKey || process.env.LANGFUSE_PUBLIC_KEY || "",
       baseUrl: config?.baseUrl || process.env.LANGFUSE_BASE_URL || "https://cloud.langfuse.com",
     };
-    this.baseUrl = this.config.baseUrl;
+    this.baseUrl = this.config.baseUrl || "https://cloud.langfuse.com";
   }
 
   private getAuthHeader(): string {

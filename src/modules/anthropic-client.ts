@@ -9,31 +9,46 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { writeFileSync } from "fs";
+import {
+  CodeExecutionFile,
+  CodeArtifact,
+  CodeExecutionResult,
+  StreamEvent,
+  CodeExecutionOptions,
+  ChatOptions,
+} from "./types.js";
 
-// Types for code execution responses
-export interface CodeExecutionFile {
-  file_id: string;
-  filename?: string;
-}
+// Re-export types for convenience
+export type {
+  CodeExecutionFile,
+  CodeArtifact,
+  CodeExecutionResult,
+  StreamEvent,
+  CodeExecutionOptions,
+  ChatOptions,
+} from "./types.js";
 
-export interface CodeArtifact {
-  path: string;
-  content: string;
-  command: "create" | "view" | "str_replace";
-}
-
-export interface CodeExecutionResult {
-  text: string;
-  files: CodeExecutionFile[];
-  codeArtifacts: CodeArtifact[];
-  containerId?: string;
-}
-
-export interface StreamEvent {
-  type: string;
-  text?: string;
-  code?: string;
-  toolName?: string;
+/**
+ * Infer programming language from file path
+ */
+function inferLanguage(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase();
+  const langMap: Record<string, string> = {
+    py: "python",
+    js: "javascript",
+    ts: "typescript",
+    rb: "ruby",
+    go: "go",
+    rs: "rust",
+    java: "java",
+    cpp: "cpp",
+    c: "c",
+    sh: "bash",
+    sql: "sql",
+    r: "r",
+    jl: "julia",
+  };
+  return langMap[ext || ""] || "python";
 }
 
 /**
@@ -51,11 +66,7 @@ export function createAnthropicClient(): Anthropic {
 export async function executeCodeWithClaude(
   client: Anthropic,
   prompt: string,
-  options?: {
-    model?: string;
-    maxTokens?: number;
-    containerId?: string;
-  }
+  options?: CodeExecutionOptions
 ): Promise<CodeExecutionResult> {
   const model = options?.model ?? "claude-sonnet-4-5-20250929";
   const maxTokens = options?.maxTokens ?? 8192;
@@ -96,22 +107,24 @@ export async function executeCodeWithClaude(
   }
 
   for (const block of response.content) {
-    if (block.type === "text") {
-      text += block.text;
-    } else if (block.type === "server_tool_use") {
+    const blockType = (block as any).type;
+    if (blockType === "text") {
+      text += (block as any).text;
+    } else if (blockType === "server_tool_use") {
       // Extract code artifacts from text_editor_code_execution tool calls
       const toolBlock = block as any;
       if (toolBlock.name === "text_editor_code_execution") {
         const input = toolBlock.input;
         if (input?.command === "create" && input?.path && input?.file_text) {
           codeArtifacts.push({
+            id: toolBlock.id || `claude_${Date.now()}`,
             path: input.path,
-            content: input.file_text,
-            command: "create",
+            code: input.file_text,
+            language: inferLanguage(input.path),
           });
         }
       }
-    } else if (block.type === "bash_code_execution_tool_result") {
+    } else if (blockType === "bash_code_execution_tool_result") {
       const result = (block as any).content;
       // Files are in result.content array with type "bash_code_execution_output"
       if (result?.type === "bash_code_execution_result" && Array.isArray(result.content)) {
@@ -119,7 +132,7 @@ export async function executeCodeWithClaude(
           if (item.type === "bash_code_execution_output" && item.file_id) {
             files.push({
               file_id: item.file_id,
-              filename: item.filename,
+              filename: item.filename || `file_${item.file_id.slice(-8)}.png`,
             });
           }
         }
@@ -137,11 +150,7 @@ export async function executeCodeWithClaudeStreaming(
   client: Anthropic,
   prompt: string,
   onEvent: (event: StreamEvent) => void,
-  options?: {
-    model?: string;
-    maxTokens?: number;
-    containerId?: string;
-  }
+  options?: CodeExecutionOptions
 ): Promise<CodeExecutionResult> {
   const model = options?.model ?? "claude-sonnet-4-5-20250929";
   const maxTokens = options?.maxTokens ?? 8192;
@@ -228,9 +237,10 @@ export async function executeCodeWithClaudeStreaming(
         const input = JSON.parse(tool.input);
         if (input?.command === "create" && input?.path && input?.file_text) {
           codeArtifacts.push({
+            id: toolId,
             path: input.path,
-            content: input.file_text,
-            command: "create",
+            code: input.file_text,
+            language: inferLanguage(input.path),
           });
         }
       } catch (e) {
@@ -249,7 +259,8 @@ export async function executeCodeWithClaudeStreaming(
 
   // Extract generated files from final message
   for (const block of finalMessage.content) {
-    if (block.type === "bash_code_execution_tool_result") {
+    const blockType = (block as any).type;
+    if (blockType === "bash_code_execution_tool_result") {
       const result = (block as any).content;
 
       // Files are in result.content array with type "bash_code_execution_output"
@@ -259,7 +270,7 @@ export async function executeCodeWithClaudeStreaming(
           if (item.type === "bash_code_execution_output" && item.file_id) {
             files.push({
               file_id: item.file_id,
-              filename: item.filename, // May be undefined
+              filename: item.filename || `file_${item.file_id.slice(-8)}.png`,
             });
           }
         }
@@ -334,11 +345,7 @@ export async function downloadGeneratedFiles(
 export async function chatWithClaude(
   client: Anthropic,
   message: string,
-  options?: {
-    model?: string;
-    maxTokens?: number;
-    system?: string;
-  }
+  options?: ChatOptions
 ): Promise<string> {
   const response = await client.messages.create({
     model: options?.model ?? "claude-sonnet-4-5-20250514",
@@ -358,11 +365,7 @@ export async function streamChatWithClaude(
   client: Anthropic,
   message: string,
   onText: (text: string) => void,
-  options?: {
-    model?: string;
-    maxTokens?: number;
-    system?: string;
-  }
+  options?: ChatOptions
 ): Promise<string> {
   const stream = client.messages.stream({
     model: options?.model ?? "claude-sonnet-4-5-20250514",
