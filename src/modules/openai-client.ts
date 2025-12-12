@@ -388,8 +388,8 @@ export async function downloadGeneratedFiles(
 
   for (const file of files) {
     try {
-      // Construct download URL
-      const url = `https://api.openai.com/v1/containers/${file.container_id}/files/${file.file_id}`;
+      // Construct download URL - need /content to get actual file bytes
+      const url = `https://api.openai.com/v1/containers/${file.container_id}/files/${file.file_id}/content`;
 
       const response = await fetch(url, {
         headers: {
