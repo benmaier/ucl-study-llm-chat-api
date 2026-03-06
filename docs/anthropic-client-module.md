@@ -183,6 +183,19 @@ handleResult(result);
 
 ### Types
 
+#### `UploadedFile`
+
+Represents a file that has been uploaded for use in code execution.
+
+```typescript
+interface UploadedFile {
+  file_id: string;    // Unique identifier for referencing in code execution
+  filename: string;   // Original filename
+  mime_type: string;  // Detected MIME type
+  size_bytes: number; // File size in bytes
+}
+```
+
 #### `CodeExecutionFile`
 
 Represents a file generated during code execution (images, data files, etc.).
@@ -472,8 +485,22 @@ During `executeCodeWithClaudeStreaming()`, the `onEvent` callback receives event
 |------------|------|------------|
 | `text` | Text is being generated | `text`: The text chunk |
 | `tool_start` | Code execution begins | `toolName`: Tool name |
-| `tool_input` | Code is being written | `text`: JSON fragment |
+| `tool_input` | Code is being written | `text`: Code content (extracted from JSON) |
 | `tool_end` | Code execution completes | `toolName`: Tool name |
+
+### Fine-Grained Tool Streaming
+
+This module uses the `fine-grained-tool-streaming-2025-05-14` beta header to enable incremental streaming of tool inputs. Without this beta:
+- The API buffers and validates the entire JSON before sending
+- This causes delays of 10-15+ seconds where nothing appears
+- Then all the code appears at once
+
+With the beta enabled:
+- Tool input chunks start streaming within ~3 seconds
+- Code appears incrementally as it's generated
+- Similar streaming experience to OpenAI's code interpreter
+
+For `text_editor_code_execution` tool calls, the module automatically extracts the actual code content from the `file_text` JSON field, so you receive clean code in `tool_input` events rather than raw JSON.
 
 ### Event Timeline
 
@@ -481,13 +508,15 @@ During `executeCodeWithClaudeStreaming()`, the `onEvent` callback receives event
 1. text         → "I'll create a plot..."
 2. text         → " Let me write the code."
 3. tool_start   → { toolName: "text_editor_code_execution" }
-4. tool_input   → { "command": "cre...
-5. tool_input   → ate", "path": "plot...
-6. tool_input   → .py", "file_text": "import...
-7. tool_end     → { toolName: "text_editor_code_execution" }
-8. tool_start   → { toolName: "bash" }
-9. tool_end     → { toolName: "bash" }
-10. text        → "I've created the plot..."
+4. tool_input   → "import matplotlib.pyplot as plt\n"
+5. tool_input   → "import numpy as np\n"
+6. tool_input   → "\nx = np.linspace(-10, 10, 100)\n"
+7. tool_input   → "y = x ** 2\n"
+8. tool_input   → ...
+9. tool_end     → { toolName: "text_editor_code_execution" }
+10. tool_start  → { toolName: "bash" }
+11. tool_end    → { toolName: "bash" }
+12. text        → "I've created the plot..."
 ```
 
 ---
@@ -954,11 +983,20 @@ model: "claude-sonnet-4-5-20250514"
 model: "claude-sonnet-4-5-20250929"
 ```
 
-### 2. Code Artifacts Require Manual Extraction in Streaming
+### 2. Beta Headers Required for Full Functionality
+
+This module uses three beta headers:
+- `code-execution-2025-08-25` - Enables code execution tool
+- `files-api-2025-04-14` - Enables file upload/download API
+- `fine-grained-tool-streaming-2025-05-14` - Enables incremental tool input streaming
+
+Without `fine-grained-tool-streaming`, code will appear all at once after a 10-15 second delay instead of streaming incrementally.
+
+### 3. Code Artifacts Require Manual Extraction in Streaming
 
 The `finalMessage()` in streaming mode returns empty `input: {}` for tool blocks. This module handles it by accumulating `input_json_delta` events during streaming.
 
-### 3. Files API Requires REST, Not SDK
+### 4. Files API Requires REST, Not SDK
 
 The SDK's `client.beta.files` methods may not work. Use the REST API directly:
 
@@ -972,7 +1010,7 @@ fetch(`https://api.anthropic.com/v1/files/${fileId}/content`, {
 });
 ```
 
-### 4. Code Execution Is Token-Heavy
+### 5. Code Execution Is Token-Heavy
 
 A single code execution request can use 10,000+ tokens due to:
 - System context for the code execution environment
@@ -981,7 +1019,7 @@ A single code execution request can use 10,000+ tokens due to:
 
 Plan for this in rate limit handling.
 
-### 5. Generated Files vs Code Artifacts
+### 6. Generated Files vs Code Artifacts
 
 - **`files`**: Binary outputs (images, CSVs) - require download via API
 - **`codeArtifacts`**: Source code (Python files) - available immediately as strings

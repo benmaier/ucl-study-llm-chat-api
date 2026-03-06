@@ -184,6 +184,19 @@ handleResult(result);
 
 ### Types
 
+#### `UploadedFile`
+
+Represents a file that has been uploaded for use in code execution.
+
+```typescript
+interface UploadedFile {
+  file_id: string;    // Unique identifier for referencing in code execution
+  filename: string;   // Original filename
+  mime_type: string;  // Detected MIME type
+  size_bytes: number; // File size in bytes
+}
+```
+
 #### `CodeExecutionFile`
 
 Represents a file generated during code execution (images, data files, etc.).
@@ -566,7 +579,6 @@ export async function POST(req: NextRequest) {
       await sendEvent("done", {
         text: result.text,
         containerId: result.containerId,
-        responseId: result.responseId,
         codeArtifacts: result.codeArtifacts,
         fileCount: result.files.length,
       });
@@ -827,7 +839,7 @@ event: file
 data: {"url":"/generated/plot.png"}
 
 event: done
-data: {"text":"The plot has been saved.","responseId":"resp_xxx","fileCount":1}
+data: {"text":"The plot has been saved.","containerId":"cntr_xxx","fileCount":1}
 ```
 
 ---
@@ -860,10 +872,10 @@ const paths = await downloadGeneratedFiles(result.files, "./output");
 
 ### Download URL Structure
 
-OpenAI container files are downloaded from:
+OpenAI container files are downloaded from (note the `/content` suffix is required):
 
 ```
-https://api.openai.com/v1/containers/{container_id}/files/{file_id}
+https://api.openai.com/v1/containers/{container_id}/files/{file_id}/content
 ```
 
 ### Manual Download
@@ -874,7 +886,7 @@ async function downloadFile(
   fileId: string
 ): Promise<Buffer> {
   const response = await fetch(
-    `https://api.openai.com/v1/containers/${containerId}/files/${fileId}`,
+    `https://api.openai.com/v1/containers/${containerId}/files/${fileId}/content`,
     {
       headers: {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -899,7 +911,7 @@ export async function GET(
   { params }: { params: { containerId: string; fileId: string } }
 ) {
   const response = await fetch(
-    `https://api.openai.com/v1/containers/${params.containerId}/files/${params.fileId}`,
+    `https://api.openai.com/v1/containers/${params.containerId}/files/${params.fileId}/content`,
     {
       headers: {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -1003,7 +1015,8 @@ Code Interpreter costs $0.03 per container session. Each new request creates a n
 | Code Artifacts | In `code_interpreter_call.code` | In `text_editor_code_execution` tool input |
 | File Location | `container_file_citation` annotations | `bash_code_execution_output` in tool results |
 | Text Delta Field | `event.delta` | `delta.text` |
-| Cost | $0.03/container | Token-based |
+| Tool Input Streaming | Native (no special config) | Requires `fine-grained-tool-streaming` beta |
+| Cost | $0.03/container | 50 free hrs/day, then $0.05/hr |
 
 ### Key Differences in Implementation
 
@@ -1018,6 +1031,10 @@ Code Interpreter costs $0.03 per container session. Each new request creates a n
 3. **Streaming Text**:
    - OpenAI: `event.delta` in `response.output_text.delta`
    - Claude: `delta.text` in `content_block_delta`
+
+4. **Tool Input Streaming**:
+   - OpenAI: Code streams incrementally by default
+   - Claude: Requires `fine-grained-tool-streaming-2025-05-14` beta header, otherwise buffers until JSON is validated (10-15s delay)
 
 ---
 

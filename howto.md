@@ -205,10 +205,12 @@ When using the streaming functions, you get real-time events:
 | `text` | AI is generating text |
 | `tool_start` | Code execution is starting |
 | `code` | Code is being written (OpenAI) |
-| `tool_input` | Tool input streaming (Claude) |
+| `tool_input` | Tool input streaming (Claude - extracted code, not raw JSON) |
 | `code_executing` | Code is running |
 | `code_complete` | Code finished |
 | `tool_end` | Code execution completed |
+
+**Note on Claude streaming:** The module uses the `fine-grained-tool-streaming-2025-05-14` beta header to enable incremental code streaming. Without this, Claude's API buffers tool inputs and sends them all at once after validation, causing 10-15 second delays.
 
 ## Costs
 

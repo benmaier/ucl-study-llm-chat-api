@@ -294,6 +294,65 @@ export async function executeCodeWithClaude(
 }
 
 /**
+ * Helper to extract code from incrementally building JSON
+ * Handles the text_editor_code_execution format: {"command":"create","path":"...","file_text":"..."}
+ */
+function extractCodeFromPartialJson(
+  jsonSoFar: string,
+  lastExtractedLength: number
+): { newCode: string; totalLength: number } {
+  // Look for the file_text field and extract its value
+  const fileTextMatch = jsonSoFar.match(/"file_text"\s*:\s*"/);
+  if (!fileTextMatch) {
+    return { newCode: "", totalLength: lastExtractedLength };
+  }
+
+  const startIndex = fileTextMatch.index! + fileTextMatch[0].length;
+
+  // Find the end of the string value (unescaped quote)
+  // We need to find content between "file_text":" and the closing "
+  // But we also need to handle escaped quotes within the string
+  let content = "";
+  let i = startIndex;
+  while (i < jsonSoFar.length) {
+    const char = jsonSoFar[i];
+    if (char === "\\") {
+      // Escape sequence - grab next char too
+      if (i + 1 < jsonSoFar.length) {
+        const nextChar = jsonSoFar[i + 1];
+        // Handle common escape sequences
+        if (nextChar === "n") {
+          content += "\n";
+        } else if (nextChar === "t") {
+          content += "\t";
+        } else if (nextChar === "r") {
+          content += "\r";
+        } else if (nextChar === '"') {
+          content += '"';
+        } else if (nextChar === "\\") {
+          content += "\\";
+        } else {
+          content += nextChar;
+        }
+        i += 2;
+        continue;
+      }
+      break; // Incomplete escape at end
+    } else if (char === '"') {
+      // End of string value
+      break;
+    } else {
+      content += char;
+      i++;
+    }
+  }
+
+  // Return only the new portion since last extraction
+  const newCode = content.slice(lastExtractedLength);
+  return { newCode, totalLength: content.length };
+}
+
+/**
  * Execute code with Claude using streaming
  */
 export async function executeCodeWithClaudeStreaming(
@@ -319,7 +378,9 @@ export async function executeCodeWithClaudeStreaming(
 
   const requestParams: any = {
     model,
-    betas: ["code-execution-2025-08-25", "files-api-2025-04-14"],
+    // Include fine-grained-tool-streaming beta to enable incremental streaming of tool inputs
+    // Without this, the API buffers and validates JSON before sending, causing delays
+    betas: ["code-execution-2025-08-25", "files-api-2025-04-14", "fine-grained-tool-streaming-2025-05-14"],
     max_tokens: maxTokens,
     messages: [
       {
@@ -348,6 +409,7 @@ export async function executeCodeWithClaudeStreaming(
   let currentToolName: string | undefined;
   let currentToolId: string | undefined;
   let currentToolInput = "";
+  let lastExtractedCodeLength = 0;
 
   // Map to store accumulated tool inputs by ID
   const toolInputs: Map<string, { name: string; input: string }> = new Map();
@@ -365,6 +427,7 @@ export async function executeCodeWithClaudeStreaming(
         currentToolName = block.name;
         currentToolId = block.id;
         currentToolInput = "";
+        lastExtractedCodeLength = 0;
         onEvent({ type: "tool_start", toolName: block.name });
       }
     } else if (event.type === "content_block_delta") {
@@ -375,7 +438,23 @@ export async function executeCodeWithClaudeStreaming(
       } else if (delta?.type === "input_json_delta") {
         // Accumulate tool input JSON
         currentToolInput += delta.partial_json || "";
-        onEvent({ type: "tool_input", text: delta.partial_json });
+
+        // For text_editor_code_execution, extract and stream the code content
+        if (currentToolName === "text_editor_code_execution") {
+          const { newCode, totalLength } = extractCodeFromPartialJson(
+            currentToolInput,
+            lastExtractedCodeLength
+          );
+          lastExtractedCodeLength = totalLength;
+
+          if (newCode) {
+            // Stream the extracted code (not the raw JSON)
+            onEvent({ type: "tool_input", text: newCode });
+          }
+        } else {
+          // For other tools, stream raw JSON as before
+          onEvent({ type: "tool_input", text: delta.partial_json });
+        }
       }
     } else if (event.type === "content_block_stop") {
       if (currentToolName && currentToolId) {
@@ -388,6 +467,7 @@ export async function executeCodeWithClaudeStreaming(
         currentToolName = undefined;
         currentToolId = undefined;
         currentToolInput = "";
+        lastExtractedCodeLength = 0;
       }
     }
   }
