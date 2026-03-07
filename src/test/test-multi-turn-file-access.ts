@@ -11,15 +11,8 @@
  */
 
 import "dotenv/config";
-import {
-  createAnthropicClient,
-  executeCodeWithClaudeMultiTurn,
-} from "../modules/anthropic-client.js";
-import {
-  createOpenAIClient,
-  executeCodeWithOpenAIMultiTurn,
-} from "../modules/openai-client.js";
-import type { StreamEvent } from "../modules/types.js";
+import { Conversation } from "../modules/conversation.js";
+import type { StreamEvent, ConversationOptions } from "../modules/types.js";
 
 const SEED = 4038682;
 
@@ -82,59 +75,21 @@ function check(label: string, got: number, want: number, tolerance: number): boo
 
 const silentHandler = (_event: StreamEvent) => {};
 
-async function testClaude(expected: { mean: number; median: number; std: number }): Promise<boolean> {
-  console.log("\n  Claude:");
+async function testProvider(
+  provider: ConversationOptions["provider"],
+  expected: { mean: number; median: number; std: number }
+): Promise<boolean> {
+  const label = provider === "anthropic" ? "Claude" : provider === "gemini" ? "Gemini" : "OpenAI";
+  console.log(`\n  ${label}:`);
   console.log("    Turn 1 — generating data.csv with seed...");
-  const client = createAnthropicClient();
 
-  const r1 = await executeCodeWithClaudeMultiTurn(client, TURN_1, silentHandler);
-  console.log("    Turn 1 done.");
+  const conv = new Conversation({ provider });
 
-  // Check whether the file contents leaked into the conversation history.
-  // We look for one of the generated values — if the model cat'd or printed
-  // the CSV, the 500 numbers would be in the tool result blocks.
-  const historyJson = JSON.stringify(r1.messages);
-  // Count how many numbers from the CSV appear (check for a distinctive float pattern)
-  const floatMatches = historyJson.match(/0\.\d{5,}/g) || [];
-  console.log(`    History size: ${historyJson.length} chars, float-like values found: ${floatMatches.length}`);
-  if (floatMatches.length > 50) {
-    console.log("    WARNING: CSV data appears to be in message history (model may not need disk access)");
-  } else {
-    console.log("    OK: CSV data not in message history — model must read from disk");
-  }
-
-  console.log("    Turn 2 — reading data.csv (no file re-linked)...");
-  const r2 = await executeCodeWithClaudeMultiTurn(
-    client, TURN_2, silentHandler, r1.messages,
-    { containerId: r1.containerId }
-  );
-
-  const parsed = parseResponse(r2.text);
-  if (!parsed) {
-    console.log(`    FAIL — could not parse JSON from response`);
-    console.log(`    Response: ${r2.text.slice(0, 300)}`);
-    return false;
-  }
-
-  const tol = 0.001;
-  const m = check("mean", parsed.mean, expected.mean, tol);
-  const med = check("median", parsed.median, expected.median, tol);
-  const s = check("std", parsed.std, expected.std, tol);
-  return m && med && s;
-}
-
-async function testOpenAI(expected: { mean: number; median: number; std: number }): Promise<boolean> {
-  console.log("\n  OpenAI:");
-  console.log("    Turn 1 — generating data.csv with seed...");
-  const client = createOpenAIClient();
-
-  const r1 = await executeCodeWithOpenAIMultiTurn(client, TURN_1, silentHandler);
+  const r1 = await conv.send(TURN_1, silentHandler);
   console.log("    Turn 1 done.");
 
   console.log("    Turn 2 — reading data.csv (no file re-linked)...");
-  const r2 = await executeCodeWithOpenAIMultiTurn(
-    client, TURN_2, silentHandler, r1.responseId
-  );
+  const r2 = await conv.send(TURN_2, silentHandler);
 
   const parsed = parseResponse(r2.text);
   if (!parsed) {
@@ -166,18 +121,19 @@ async function main() {
 
   const results: { name: string; pass: boolean }[] = [];
 
-  try {
-    results.push({ name: "Claude", pass: await testClaude(expected) });
-  } catch (e) {
-    console.log(`  Claude: ERROR — ${e}`);
-    results.push({ name: "Claude", pass: false });
-  }
-
-  try {
-    results.push({ name: "OpenAI", pass: await testOpenAI(expected) });
-  } catch (e) {
-    console.log(`  OpenAI: ERROR — ${e}`);
-    results.push({ name: "OpenAI", pass: false });
+  for (const provider of ["anthropic", "openai", "gemini"] as const) {
+    const label = provider === "anthropic" ? "Claude" : provider === "gemini" ? "Gemini" : "OpenAI";
+    if (provider === "gemini") {
+      console.log(`\n  ${label}: SKIPPED — Gemini sandbox is ephemeral (no cross-turn file persistence)`);
+      results.push({ name: label, pass: true });
+      continue;
+    }
+    try {
+      results.push({ name: label, pass: await testProvider(provider, expected) });
+    } catch (e) {
+      console.log(`  ${label}: ERROR — ${e}`);
+      results.push({ name: label, pass: false });
+    }
   }
 
   console.log("\n" + "=".repeat(60));

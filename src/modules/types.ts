@@ -22,6 +22,8 @@ export interface CodeExecutionFile {
   file_id: string;
   filename: string;
   container_id?: string; // OpenAI only
+  base64Data?: string;   // Gemini only — inline image data
+  mimeType?: string;     // Gemini only — MIME type of inline data
 }
 
 /**
@@ -52,6 +54,7 @@ export interface StreamEvent {
   text?: string;      // Text content (for "text" type)
   code?: string;      // Code content (for "code" and "code_complete" types)
   toolName?: string;  // Tool name (for "tool_start" and "tool_end" types)
+  output?: string;    // Execution output (for "code_output" type, Gemini only)
 }
 
 /**
@@ -64,6 +67,7 @@ export type StreamEventType =
   | "code"           // Code streaming (OpenAI only)
   | "code_executing" // Code is being executed
   | "code_complete"  // Code execution complete
+  | "code_output"    // Execution output/stdout (Gemini only)
   | "tool_end";      // Code execution tool ended
 
 /**
@@ -101,4 +105,26 @@ export interface MultiTurnCodeResult extends CodeExecutionResult {
   messages: ConversationMessage[];
   /** For OpenAI Responses API: the response ID to chain with previous_response_id */
   responseId?: string;
+  /** For Gemini: raw contents array for multi-turn history */
+  geminiContents?: any[];
+}
+
+/**
+ * Options for creating a Conversation instance
+ */
+export interface ConversationOptions {
+  provider: "anthropic" | "openai" | "gemini";
+  apiKey?: string;
+  model?: string;
+  maxTokens?: number;
+}
+
+/**
+ * Lightweight result from a single conversation turn
+ * (internal state like messages/responseId/containerId is managed by the Conversation class)
+ */
+export interface TurnResult {
+  text: string;
+  files: CodeExecutionFile[];
+  codeArtifacts: CodeArtifact[];
 }

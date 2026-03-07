@@ -8,17 +8,8 @@
  */
 
 import "dotenv/config";
-import {
-  createAnthropicClient,
-  executeCodeWithClaudeMultiTurn,
-  downloadGeneratedFiles as downloadClaudeFiles,
-} from "../modules/anthropic-client.js";
-import {
-  createOpenAIClient,
-  executeCodeWithOpenAIMultiTurn,
-  downloadGeneratedFiles as downloadOpenAIFiles,
-} from "../modules/openai-client.js";
-import type { StreamEvent } from "../modules/types.js";
+import { Conversation } from "../modules/conversation.js";
+import type { StreamEvent, ConversationOptions } from "../modules/types.js";
 
 const TURN_1 = "Plot y = sin(x) * exp(-x/5) for x from 0 to 20. Blue line, grid, title, legend. Save as plot.png.";
 const TURN_2 = "Now change the line to red, and add the analytical derivative as a dashed green line on the same plot. Update the legend and save again.";
@@ -29,57 +20,29 @@ const handleEvent = (event: StreamEvent) => {
   if (event.type === "tool_end") console.log(`  [${event.toolName} done]`);
 };
 
-async function demoClaude() {
+async function demoProvider(provider: ConversationOptions["provider"]) {
+  const label = provider === "anthropic" ? "CLAUDE" : provider === "gemini" ? "GEMINI" : "OPENAI";
   console.log("\n" + "═".repeat(60));
-  console.log("  CLAUDE — Multi-turn");
+  console.log(`  ${label} — Multi-turn`);
   console.log("═".repeat(60));
 
-  const client = createAnthropicClient();
+  const conv = new Conversation({ provider });
 
   // Turn 1
   console.log(`\n> Turn 1: ${TURN_1}\n`);
-  const r1 = await executeCodeWithClaudeMultiTurn(client, TURN_1, handleEvent);
-  if (r1.files.length) await downloadClaudeFiles(client, r1.files, ".");
-  console.log(`\n  Container: ${r1.containerId}`);
+  const r1 = await conv.send(TURN_1, handleEvent);
+  if (r1.files.length) await conv.downloadFiles(r1.files, ".");
 
-  // Turn 2 — pass previous messages + reuse container
+  // Turn 2
   console.log(`\n> Turn 2: ${TURN_2}\n`);
-  const r2 = await executeCodeWithClaudeMultiTurn(
-    client, TURN_2, handleEvent, r1.messages,
-    { containerId: r1.containerId }
-  );
+  const r2 = await conv.send(TURN_2, handleEvent);
   if (r2.files.length) {
-    const paths = await downloadClaudeFiles(client, r2.files, ".");
+    const paths = await conv.downloadFiles(r2.files, ".");
     console.log(`\n  Downloaded: ${paths.join(", ")}`);
   }
 
-  console.log("\n  Claude multi-turn complete.\n");
-}
-
-async function demoOpenAI() {
-  console.log("═".repeat(60));
-  console.log("  OPENAI — Multi-turn");
-  console.log("═".repeat(60));
-
-  const client = createOpenAIClient();
-
-  // Turn 1
-  console.log(`\n> Turn 1: ${TURN_1}\n`);
-  const r1 = await executeCodeWithOpenAIMultiTurn(client, TURN_1, handleEvent);
-  if (r1.files.length) await downloadOpenAIFiles(r1.files, ".");
-  console.log(`\n  Response ID: ${r1.responseId}`);
-
-  // Turn 2 — chain via responseId
-  console.log(`\n> Turn 2: ${TURN_2}\n`);
-  const r2 = await executeCodeWithOpenAIMultiTurn(
-    client, TURN_2, handleEvent, r1.responseId
-  );
-  if (r2.files.length) {
-    const paths = await downloadOpenAIFiles(r2.files, ".");
-    console.log(`\n  Downloaded: ${paths.join(", ")}`);
-  }
-
-  console.log("\n  OpenAI multi-turn complete.\n");
+  console.log(`\n  ${label} multi-turn complete.`);
+  console.log(`  History: ${conv.getHistory().length} messages\n`);
 }
 
 async function main() {
@@ -92,8 +55,9 @@ async function main() {
 
   const start = Date.now();
 
-  await demoClaude();
-  await demoOpenAI();
+  await demoProvider("anthropic");
+  await demoProvider("openai");
+  await demoProvider("gemini");
 
   console.log("━".repeat(60));
   console.log(`  Done in ${((Date.now() - start) / 1000).toFixed(1)}s`);

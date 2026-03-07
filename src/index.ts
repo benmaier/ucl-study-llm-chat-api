@@ -36,6 +36,23 @@ export {
   streamChatWithOpenAI,
 } from "./modules/openai-client.js";
 
+// Export Gemini client functions
+export {
+  createGeminiClient,
+  uploadFile as uploadGeminiFile,
+  uploadFileFromBuffer as uploadGeminiFileFromBuffer,
+  deleteFile as deleteGeminiFile,
+  executeCodeWithGemini,
+  executeCodeWithGeminiStreaming,
+  executeCodeWithGeminiMultiTurn,
+  downloadGeneratedFiles as downloadGeminiFiles,
+  chatWithGemini,
+  streamChatWithGemini,
+} from "./modules/gemini-client.js";
+
+// Export Conversation class
+export { Conversation } from "./modules/conversation.js";
+
 // Export Langfuse client
 export * from "./modules/langfuse-client.js";
 

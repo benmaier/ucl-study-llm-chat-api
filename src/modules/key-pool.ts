@@ -8,7 +8,7 @@
 
 import type { Pool } from "pg";
 
-export type Provider = "anthropic" | "openai";
+export type Provider = "anthropic" | "openai" | "gemini";
 
 interface AssignedKey {
   provider: Provider;
@@ -40,7 +40,7 @@ export class KeyPool {
    * - Returns the API key string
    */
   async fetchKeys(providers?: Provider[]): Promise<void> {
-    const toFetch = providers || (["anthropic", "openai"] as Provider[]);
+    const toFetch = providers || (["anthropic", "openai", "gemini"] as Provider[]);
 
     // Fetch condition info if not already cached
     if (!this.condition) {

@@ -12,12 +12,16 @@
     "test:openai": "npx tsx src/test/test-openai.ts",
     "test:openai:upload": "npx tsx src/test/test-openai-file-upload.ts",
     "test:openai:stream": "npx tsx src/test/test-openai-file-upload-streaming.ts",
-    "test:all": "npm run test:anthropic && npm run test:openai",
+    "test:gemini": "npx tsx src/test/test-gemini.ts",
+    "test:gemini:upload": "npx tsx src/test/test-gemini-file-upload.ts",
+    "test:gemini:stream": "npx tsx src/test/test-gemini-file-upload-streaming.ts",
+    "test:all": "npm run test:anthropic && npm run test:openai && npm run test:gemini",
     "demo:multi-turn": "npx tsx src/test/demo-multi-turn.ts",
     "test:multi-turn": "npx tsx src/test/test-multi-turn-file-access.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "@google/genai": "^1.44.0",
     "dotenv": "^16.4.5",
     "openai": "^4.77.0",
     "pg": "^8.13.1"
