@@ -33,6 +33,10 @@ describe.skipIf(!HAS_KEY)("OpenAI streaming code execution", () => {
     expect(events.some(e => e.type === "text")).toBe(true);
     expect(events.some(e => e.type === "tool_start")).toBe(true);
     expect(events.some(e => e.type === "tool_end")).toBe(true);
+
+    // Verify code streams incrementally (multiple code deltas)
+    const codeEvents = events.filter(e => e.type === "code");
+    expect(codeEvents.length).toBeGreaterThan(1);
   });
 
   it("should download generated files", async () => {

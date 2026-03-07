@@ -62,6 +62,10 @@ describe.skipIf(!HAS_KEY || !HAS_CSV)("Anthropic file upload + code execution", 
     expect(events.some(e => e.type === "text")).toBe(true);
     expect(events.some(e => e.type === "tool_start")).toBe(true);
 
+    // Verify code streams incrementally (multiple tool_input deltas)
+    const codeEvents = events.filter(e => e.type === "tool_input");
+    expect(codeEvents.length).toBeGreaterThan(1);
+
     // Download
     if (result.files.length > 0) {
       const paths = await downloadGeneratedFiles(client, result.files, "/tmp");

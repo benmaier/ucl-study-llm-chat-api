@@ -62,6 +62,10 @@ describe.skipIf(!HAS_KEY || !HAS_CSV)("Gemini file upload + code execution", () 
     expect(events.some(e => e.type === "text")).toBe(true);
     expect(events.some(e => e.type === "tool_start")).toBe(true);
 
+    // Verify code events emitted (Gemini sends complete blocks, not deltas)
+    const codeEvents = events.filter(e => e.type === "code");
+    expect(codeEvents.length).toBeGreaterThan(0);
+
     // Download (base64 inline files)
     if (result.files.length > 0) {
       const paths = await downloadGeneratedFiles(result.files, "/tmp");

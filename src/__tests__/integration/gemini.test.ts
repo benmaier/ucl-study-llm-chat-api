@@ -34,6 +34,10 @@ describe.skipIf(!HAS_KEY)("Gemini streaming code execution", () => {
     expect(events.some(e => e.type === "text")).toBe(true);
     expect(events.some(e => e.type === "tool_start")).toBe(true);
     expect(events.some(e => e.type === "tool_end")).toBe(true);
+
+    // Verify code events emitted (Gemini sends complete blocks, not deltas)
+    const codeEvents = events.filter(e => e.type === "code");
+    expect(codeEvents.length).toBeGreaterThan(0);
   });
 
   it("should download base64 files to disk", async () => {

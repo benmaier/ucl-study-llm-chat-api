@@ -33,6 +33,10 @@ describe.skipIf(!HAS_KEY)("Anthropic streaming code execution", () => {
     expect(events.some(e => e.type === "text")).toBe(true);
     expect(events.some(e => e.type === "tool_start")).toBe(true);
     expect(events.some(e => e.type === "tool_end")).toBe(true);
+
+    // Verify code streams incrementally (multiple tool_input deltas)
+    const codeEvents = events.filter(e => e.type === "tool_input");
+    expect(codeEvents.length).toBeGreaterThan(1);
   });
 
   it("should download generated files", async () => {

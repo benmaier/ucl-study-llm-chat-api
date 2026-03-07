@@ -62,6 +62,10 @@ describe.skipIf(!HAS_KEY || !HAS_CSV)("OpenAI file upload + code execution", () 
     expect(events.some(e => e.type === "text")).toBe(true);
     expect(events.some(e => e.type === "tool_start")).toBe(true);
 
+    // Verify code streams incrementally (multiple code deltas)
+    const codeEvents = events.filter(e => e.type === "code");
+    expect(codeEvents.length).toBeGreaterThan(1);
+
     // Download
     if (result.files.length > 0) {
       const paths = await downloadGeneratedFiles(result.files, "/tmp");
