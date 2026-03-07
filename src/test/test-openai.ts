@@ -54,8 +54,7 @@ async function main() {
         console.log("[Executing code...]");
         break;
       case "code":
-        // Optionally show code being executed
-        // process.stdout.write(event.code || "");
+        process.stdout.write(event.code || "");
         break;
       case "code_complete":
         console.log("[Code complete]");

@@ -17,6 +17,8 @@ const TURN_2 = "Now change the line to red, and add the analytical derivative as
 const handleEvent = (event: StreamEvent) => {
   if (event.type === "text") process.stdout.write(event.text || "");
   if (event.type === "tool_start") console.log(`\n  [${event.toolName} running...]`);
+  if (event.type === "tool_input") process.stdout.write(event.text || "");
+  if (event.type === "code") process.stdout.write(event.code || "");
   if (event.type === "tool_end") console.log(`  [${event.toolName} done]`);
 };
 

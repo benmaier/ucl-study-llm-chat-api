@@ -50,8 +50,7 @@ async function main() {
         console.log(`\n[Tool: ${event.toolName} started]`);
         break;
       case "code":
-        // Optionally show code being executed
-        // process.stdout.write(event.code || "");
+        process.stdout.write(event.code || "");
         break;
       case "code_complete":
         console.log("[Code complete]");

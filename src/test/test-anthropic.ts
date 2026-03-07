@@ -54,8 +54,7 @@ async function main() {
         console.log(`[Tool: ${event.toolName} completed]`);
         break;
       case "tool_input":
-        // Optionally show tool input
-        // process.stdout.write(event.text || "");
+        process.stdout.write(event.text || "");
         break;
     }
   };
