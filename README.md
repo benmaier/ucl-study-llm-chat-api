@@ -1,4 +1,4 @@
-# test-native-apis
+# LLM Chat API
 
 TypeScript library for code execution with Claude (Anthropic), OpenAI, and Gemini. Each provider runs Python in a sandboxed container -- you send a prompt, get back text, generated files (plots, CSVs), and the source code that was executed.
 
