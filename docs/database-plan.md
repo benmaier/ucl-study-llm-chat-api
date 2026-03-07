@@ -3,7 +3,8 @@
 ## Overview
 
 A PostgreSQL database for:
-- **Token management** - Validating participant tokens for API proxy
+- **Token management** - Authenticating participants and assigning experiment conditions
+- **API key pool** - Securely distributing API keys to participants via load-balanced pools
 - **Conversation logging** - Storing all participant conversations for research
 - **Artifact storage** - Storing generated files (images, code, CSVs) directly in DB
 
@@ -36,12 +37,15 @@ For 400 participants × 2 hours each:
 
 ## Schema
 
+### Core Tables
+
 ```sql
--- Participants/tokens for API proxy authentication
+-- Participants/tokens for authentication
 CREATE TABLE tokens (
   id SERIAL PRIMARY KEY,
   token VARCHAR(64) UNIQUE NOT NULL,
   db_user VARCHAR(64) NOT NULL,  -- maps to participant_001, etc.
+  condition_id INT REFERENCES experiment_conditions(id),
   created_at TIMESTAMP DEFAULT NOW(),
   expires_at TIMESTAMP,
   is_active BOOLEAN DEFAULT true
@@ -90,22 +94,107 @@ CREATE INDEX idx_messages_db_user ON messages(db_user);
 CREATE INDEX idx_artifacts_conversation ON artifacts(conversation_id);
 ```
 
-## Access Control
-
-Three types of database users with Row-Level Security (RLS):
-
-### 1. Proxy Role (read-only for tokens)
-
-Used by the Vercel proxy to validate tokens:
+### Key Pool Tables
 
 ```sql
-CREATE ROLE proxy_role WITH LOGIN PASSWORD 'proxy_secret';
+-- Experiment conditions (e.g., 'claude-only', 'openai-only', 'both')
+CREATE TABLE experiment_conditions (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(100) UNIQUE NOT NULL,
+  description TEXT,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP DEFAULT NOW()
+);
 
--- Only SELECT on tokens table
-GRANT SELECT ON tokens TO proxy_role;
+-- Pool of API keys
+CREATE TABLE api_keys (
+  id SERIAL PRIMARY KEY,
+  provider VARCHAR(20) NOT NULL,           -- 'anthropic' or 'openai'
+  api_key TEXT NOT NULL,
+  label VARCHAR(100),                       -- e.g., 'anthropic-key-1'
+  session_assignment_count INT DEFAULT 0,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Links conditions to their available keys
+CREATE TABLE condition_key_pools (
+  id SERIAL PRIMARY KEY,
+  condition_id INT REFERENCES experiment_conditions(id) ON DELETE CASCADE,
+  api_key_id INT REFERENCES api_keys(id) ON DELETE CASCADE,
+  UNIQUE(condition_id, api_key_id)
+);
+
+-- Audit log of key assignments
+CREATE TABLE session_key_assignments (
+  id SERIAL PRIMARY KEY,
+  db_user VARCHAR(64) NOT NULL,
+  api_key_id INT REFERENCES api_keys(id),
+  provider VARCHAR(20) NOT NULL,
+  assigned_at TIMESTAMP DEFAULT NOW()
+);
 ```
 
-### 2. Per-Participant Users (RLS-protected)
+### `assign_api_key()` Function
+
+Participants never get direct SELECT on `api_keys`. Instead they call a stored function that runs with admin privileges:
+
+```sql
+CREATE OR REPLACE FUNCTION assign_api_key(p_provider VARCHAR(20))
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_condition_id INT;
+  v_key_id INT;
+  v_api_key TEXT;
+BEGIN
+  -- Look up participant's condition via current_user + tokens table
+  SELECT t.condition_id INTO v_condition_id
+  FROM tokens t
+  WHERE t.db_user = current_user
+    AND t.is_active = true
+  LIMIT 1;
+
+  IF v_condition_id IS NULL THEN
+    RAISE EXCEPTION 'No active condition found for user %', current_user;
+  END IF;
+
+  -- Find least-used active key for this provider in this condition's pool
+  SELECT ak.id, ak.api_key
+  INTO v_key_id, v_api_key
+  FROM api_keys ak
+  JOIN condition_key_pools ckp ON ckp.api_key_id = ak.id
+  WHERE ckp.condition_id = v_condition_id
+    AND ak.provider = p_provider
+    AND ak.is_active = true
+  ORDER BY ak.session_assignment_count ASC
+  LIMIT 1;
+
+  IF v_key_id IS NULL THEN
+    RAISE EXCEPTION 'No active % key available for condition %', p_provider, v_condition_id;
+  END IF;
+
+  -- Increment session_assignment_count for load balancing
+  UPDATE api_keys SET session_assignment_count = session_assignment_count + 1
+  WHERE id = v_key_id;
+
+  -- Log the assignment
+  INSERT INTO session_key_assignments (db_user, api_key_id, provider)
+  VALUES (current_user, v_key_id, p_provider);
+
+  RETURN v_api_key;
+END;
+$$;
+```
+
+## Access Control
+
+Two types of database users with Row-Level Security (RLS):
+
+### 1. Per-Participant Users (RLS-protected)
 
 Each participant gets their own database user. Row-Level Security ensures they can only access their own data.
 
@@ -125,9 +214,15 @@ GRANT UPDATE (ended_at) ON conversations TO participant_001, participant_002;
 GRANT USAGE ON SEQUENCE conversations_id_seq TO participant_001, participant_002;
 GRANT USAGE ON SEQUENCE messages_id_seq TO participant_001, participant_002;
 GRANT USAGE ON SEQUENCE artifacts_id_seq TO participant_001, participant_002;
+
+-- Grant EXECUTE on the key assignment function (NOT direct access to api_keys table)
+GRANT EXECUTE ON FUNCTION assign_api_key(VARCHAR) TO participant_001, participant_002;
+
+-- Grant SELECT on tokens so condition lookup works within the function
+-- (the SECURITY DEFINER function runs as admin, so this is optional but explicit)
 ```
 
-### 3. Admin Role (full access)
+### 2. Admin Role (full access)
 
 Used by researchers via admin panel:
 
@@ -205,49 +300,15 @@ CREATE POLICY select_own_artifacts ON artifacts
 -- No UPDATE or DELETE policies for artifacts
 ```
 
-## Integration with Vercel Proxy
-
-The proxy caches tokens and refreshes every 5 minutes:
-
-```typescript
-import { Pool } from "pg";
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
-
-let cachedTokens: Set<string> | null = null;
-let cacheTime = 0;
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
-export async function validateToken(token: string): Promise<boolean> {
-  // Refresh cache if expired
-  if (!cachedTokens || Date.now() - cacheTime > CACHE_TTL) {
-    const { rows } = await pool.query(
-      "SELECT token FROM tokens WHERE is_active = true AND (expires_at IS NULL OR expires_at > NOW())"
-    );
-    cachedTokens = new Set(rows.map(r => r.token));
-    cacheTime = Date.now();
-  }
-
-  return cachedTokens.has(token);
-}
-```
-
-Environment variable for Vercel:
-```
-DATABASE_URL=postgresql://proxy_role:proxy_secret@xxx.scw.cloud:5432/research_db
-```
-
 ## Integration with Desktop App
 
-The Electron app connects directly to the database using participant credentials. Each participant logs in with their own username/password.
+The Electron app connects directly to the database using participant credentials. At login, it fetches API keys via the key pool, then calls Claude/OpenAI APIs directly.
 
-### Connection
+### Connection and Key Pool
 
 ```typescript
 import { Pool } from "pg";
+import { createKeyPool } from "test-native-apis";
 
 // Participant enters credentials in login screen
 function createConnection(username: string, password: string): Pool {
@@ -264,8 +325,19 @@ function createConnection(username: string, password: string): Pool {
 let pool: Pool;
 
 // On login
-function onLogin(username: string, password: string) {
+async function onLogin(username: string, password: string) {
   pool = createConnection(username, password);
+
+  // Fetch API keys from the database key pool
+  const keyPool = createKeyPool(pool);
+  await keyPool.fetchKeys();  // fetches keys for all available providers
+
+  // Use keys to create API clients
+  const anthropicKey = keyPool.getKey("anthropic");
+  const openaiKey = keyPool.getKey("openai");
+
+  console.log("Available providers:", keyPool.getAvailableProviders());
+  console.log("Condition:", keyPool.getCondition());
 }
 ```
 
@@ -324,21 +396,25 @@ async function getMyConversations() {
 | `INSERT INTO messages (...)` | `db_user` auto-set to current participant |
 | `UPDATE messages SET is_deleted = true WHERE id = 5` | Only works if message belongs to participant |
 | `DELETE FROM messages` | Fails - no DELETE policy exists |
+| `SELECT * FROM api_keys` | Fails - no SELECT granted on api_keys |
 
 ## Researcher Workflow
 
 1. **Before experiment**:
-   - Generate tokens via admin panel
-   - Tokens stored in `tokens` table with `is_active = true`
+   - Create experiment conditions and assign API keys to pools
+   - Generate participant users and tokens via admin panel
+   - Assign each token to a condition
 
 2. **During experiment**:
-   - Proxy validates tokens against DB (cached)
-   - Desktop app logs all conversations and artifacts
+   - Desktop app fetches API keys via `assign_api_key()` at login
+   - App calls Claude/OpenAI APIs directly with the assigned keys
+   - Desktop app logs all conversations and artifacts to DB
    - Participants can only INSERT, not read others' data
 
 3. **After experiment**:
    - Set `is_active = false` on tokens
    - Export data via admin panel for analysis
+   - Review `session_key_assignments` for key usage audit trail
    - All conversations and artifacts available in DB
 
 ## Storage Estimate

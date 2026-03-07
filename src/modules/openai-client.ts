@@ -17,6 +17,8 @@ import {
   StreamEvent,
   CodeExecutionOptions,
   ChatOptions,
+  ConversationMessage,
+  MultiTurnCodeResult,
 } from "./types.js";
 
 // Re-export types for convenience
@@ -28,14 +30,16 @@ export type {
   StreamEvent,
   CodeExecutionOptions,
   ChatOptions,
+  ConversationMessage,
+  MultiTurnCodeResult,
 } from "./types.js";
 
 /**
  * Create OpenAI client
  */
-export function createOpenAIClient(): OpenAI {
+export function createOpenAIClient(apiKey?: string): OpenAI {
   return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+    apiKey: apiKey || process.env.OPENAI_API_KEY,
   });
 }
 
@@ -382,7 +386,8 @@ export async function executeCodeWithOpenAIStreaming(
  */
 export async function downloadGeneratedFiles(
   files: CodeExecutionFile[],
-  outputDir: string = "."
+  outputDir: string = ".",
+  apiKey?: string
 ): Promise<string[]> {
   const downloadedPaths: string[] = [];
 
@@ -393,7 +398,7 @@ export async function downloadGeneratedFiles(
 
       const response = await fetch(url, {
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${apiKey || process.env.OPENAI_API_KEY}`,
         },
       });
 
@@ -471,4 +476,150 @@ export async function streamChatWithOpenAI(
   }
 
   return fullText;
+}
+
+/**
+ * Multi-turn code execution with OpenAI.
+ *
+ * Uses the Responses API's `previous_response_id` to chain turns.
+ * Pass the returned `responseId` back on subsequent calls.
+ */
+export async function executeCodeWithOpenAIMultiTurn(
+  client: OpenAI,
+  userMessage: string,
+  onEvent: (event: StreamEvent) => void,
+  previousResponseId?: string,
+  options?: CodeExecutionOptions
+): Promise<MultiTurnCodeResult> {
+  const model = options?.model ?? "gpt-4o";
+
+  const containerConfig: any = { type: "auto" };
+  if (options?.fileIds?.length) {
+    containerConfig.file_ids = options.fileIds;
+  }
+
+  const requestParams: any = {
+    model,
+    input: userMessage,
+    tools: [
+      {
+        type: "code_interpreter",
+        container: containerConfig,
+      },
+    ],
+    stream: true,
+  };
+
+  if (previousResponseId) {
+    requestParams.previous_response_id = previousResponseId;
+  }
+
+  const stream: any = await client.responses.create(requestParams);
+
+  let fullText = "";
+  let currentCode = "";
+  const files: CodeExecutionFile[] = [];
+  const codeArtifacts: CodeArtifact[] = [];
+  let containerId: string | undefined;
+  let fullResponse: any = null;
+  let currentCodeInterpreterId: string | undefined;
+
+  for await (const event of stream) {
+    switch (event.type) {
+      case "response.output_item.added":
+        if (event.item?.type === "code_interpreter_call") {
+          currentCodeInterpreterId = event.item.id;
+          currentCode = "";
+          onEvent({ type: "tool_start", toolName: "code_interpreter" });
+        }
+        break;
+      case "response.output_text.delta":
+        if (event.delta) {
+          fullText += event.delta;
+          onEvent({ type: "text", text: event.delta });
+        }
+        break;
+      case "response.code_interpreter_call.in_progress":
+        onEvent({ type: "code_executing" });
+        break;
+      case "response.code_interpreter_call_code.delta":
+        const codeDelta = event.delta || event.code || "";
+        if (codeDelta) {
+          currentCode += codeDelta;
+          onEvent({ type: "code", code: codeDelta });
+        }
+        break;
+      case "response.code_interpreter_call_code.done":
+        if (event.code) currentCode = event.code;
+        onEvent({ type: "code_complete", code: currentCode });
+        break;
+      case "response.code_interpreter_call.completed":
+        onEvent({ type: "tool_end", toolName: "code_interpreter" });
+        break;
+      case "response.output_text.annotation.added":
+        const annotation = event.annotation;
+        if (annotation?.type === "container_file_citation") {
+          files.push({
+            file_id: annotation.file_id,
+            container_id: annotation.container_id,
+            filename: annotation.filename,
+          });
+          if (annotation.container_id) containerId = annotation.container_id;
+        }
+        break;
+      case "response.completed":
+        fullResponse = event.response;
+        break;
+    }
+  }
+
+  // Extract code artifacts from final response
+  if (fullResponse?.output) {
+    for (const item of fullResponse.output) {
+      if (item.type === "code_interpreter_call") {
+        if (item.code) {
+          codeArtifacts.push({
+            id: item.id,
+            path: "code_interpreter",
+            code: item.code,
+            language: "python",
+          });
+        }
+        if (item.container_id && !containerId) containerId = item.container_id;
+      } else if (item.type === "message") {
+        for (const content of item.content || []) {
+          if (content.annotations) {
+            for (const annotation of content.annotations) {
+              if (annotation.type === "container_file_citation") {
+                const exists = files.some((f) => f.file_id === annotation.file_id);
+                if (!exists) {
+                  files.push({
+                    file_id: annotation.file_id,
+                    container_id: annotation.container_id,
+                    filename: annotation.filename,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Build conversation history for the provider-agnostic interface
+  const updatedMessages: ConversationMessage[] = [];
+  // We don't reconstruct full history since OpenAI chains via response IDs,
+  // but we expose the messages for the caller's convenience
+  updatedMessages.push({ role: "user", content: userMessage });
+  updatedMessages.push({ role: "assistant", content: fullText });
+
+  return {
+    text: fullText,
+    files,
+    codeArtifacts,
+    containerId,
+    messages: updatedMessages,
+    responseId: fullResponse?.id,
+  };
 }

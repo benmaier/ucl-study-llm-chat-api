@@ -12,15 +12,19 @@
     "test:openai": "npx tsx src/test/test-openai.ts",
     "test:openai:upload": "npx tsx src/test/test-openai-file-upload.ts",
     "test:openai:stream": "npx tsx src/test/test-openai-file-upload-streaming.ts",
-    "test:all": "npm run test:anthropic && npm run test:openai"
+    "test:all": "npm run test:anthropic && npm run test:openai",
+    "demo:multi-turn": "npx tsx src/test/demo-multi-turn.ts",
+    "test:multi-turn": "npx tsx src/test/test-multi-turn-file-access.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@anthropic-ai/sdk": "^0.78.0",
+    "dotenv": "^16.4.5",
     "openai": "^4.77.0",
-    "dotenv": "^16.4.5"
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

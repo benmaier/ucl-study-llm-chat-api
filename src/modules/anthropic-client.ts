@@ -17,6 +17,8 @@ import {
   StreamEvent,
   CodeExecutionOptions,
   ChatOptions,
+  ConversationMessage,
+  MultiTurnCodeResult,
 } from "./types.js";
 
 // Re-export types for convenience
@@ -28,6 +30,8 @@ export type {
   StreamEvent,
   CodeExecutionOptions,
   ChatOptions,
+  ConversationMessage,
+  MultiTurnCodeResult,
 } from "./types.js";
 
 /**
@@ -56,9 +60,9 @@ function inferLanguage(path: string): string {
 /**
  * Create Anthropic client
  */
-export function createAnthropicClient(): Anthropic {
+export function createAnthropicClient(apiKey?: string): Anthropic {
   return new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
+    apiKey: apiKey || process.env.ANTHROPIC_API_KEY,
   });
 }
 
@@ -68,7 +72,8 @@ export function createAnthropicClient(): Anthropic {
 export async function uploadFile(
   client: Anthropic,
   filePath: string,
-  mimeType?: string
+  mimeType?: string,
+  apiKey?: string
 ): Promise<UploadedFile> {
   const fs = await import("fs");
   const path = await import("path");
@@ -86,7 +91,7 @@ export async function uploadFile(
   const response = await fetch("https://api.anthropic.com/v1/files", {
     method: "POST",
     headers: {
-      "x-api-key": process.env.ANTHROPIC_API_KEY || "",
+      "x-api-key": apiKey || process.env.ANTHROPIC_API_KEY || "",
       "anthropic-version": "2023-06-01",
       "anthropic-beta": "files-api-2025-04-14",
     },
@@ -115,7 +120,8 @@ export async function uploadFileFromBuffer(
   client: Anthropic,
   buffer: Buffer,
   filename: string,
-  mimeType?: string
+  mimeType?: string,
+  apiKey?: string
 ): Promise<UploadedFile> {
   const detectedMimeType = mimeType || inferMimeType(filename);
 
@@ -128,7 +134,7 @@ export async function uploadFileFromBuffer(
   const response = await fetch("https://api.anthropic.com/v1/files", {
     method: "POST",
     headers: {
-      "x-api-key": process.env.ANTHROPIC_API_KEY || "",
+      "x-api-key": apiKey || process.env.ANTHROPIC_API_KEY || "",
       "anthropic-version": "2023-06-01",
       "anthropic-beta": "files-api-2025-04-14",
     },
@@ -155,12 +161,13 @@ export async function uploadFileFromBuffer(
  */
 export async function deleteFile(
   client: Anthropic,
-  fileId: string
+  fileId: string,
+  apiKey?: string
 ): Promise<void> {
   const response = await fetch(`https://api.anthropic.com/v1/files/${fileId}`, {
     method: "DELETE",
     headers: {
-      "x-api-key": process.env.ANTHROPIC_API_KEY || "",
+      "x-api-key": apiKey || process.env.ANTHROPIC_API_KEY || "",
       "anthropic-version": "2023-06-01",
       "anthropic-beta": "files-api-2025-04-14",
     },
@@ -223,7 +230,6 @@ export async function executeCodeWithClaude(
 
   const requestParams: any = {
     model,
-    betas: ["code-execution-2025-08-25", "files-api-2025-04-14"],
     max_tokens: maxTokens,
     messages: [
       {
@@ -239,11 +245,18 @@ export async function executeCodeWithClaude(
     ],
   };
 
+  // Files API still requires a beta header
+  if (options?.fileIds?.length) {
+    requestParams.betas = ["files-api-2025-04-14"];
+  }
+
   if (options?.containerId) {
     requestParams.container = options.containerId;
   }
 
-  const response = await client.beta.messages.create(requestParams);
+  const response = await (requestParams.betas
+    ? client.beta.messages.create(requestParams)
+    : client.messages.create(requestParams));
 
   // Extract text, files, and code artifacts from response
   let text = "";
@@ -378,9 +391,6 @@ export async function executeCodeWithClaudeStreaming(
 
   const requestParams: any = {
     model,
-    // Include fine-grained-tool-streaming beta to enable incremental streaming of tool inputs
-    // Without this, the API buffers and validates JSON before sending, causing delays
-    betas: ["code-execution-2025-08-25", "files-api-2025-04-14", "fine-grained-tool-streaming-2025-05-14"],
     max_tokens: maxTokens,
     messages: [
       {
@@ -396,11 +406,18 @@ export async function executeCodeWithClaudeStreaming(
     ],
   };
 
+  // Files API still requires a beta header
+  if (options?.fileIds?.length) {
+    requestParams.betas = ["files-api-2025-04-14"];
+  }
+
   if (options?.containerId) {
     requestParams.container = options.containerId;
   }
 
-  const stream = await client.beta.messages.stream(requestParams);
+  const stream = await (requestParams.betas
+    ? client.beta.messages.stream(requestParams)
+    : client.messages.stream(requestParams));
 
   let fullText = "";
   const files: CodeExecutionFile[] = [];
@@ -529,7 +546,8 @@ export async function executeCodeWithClaudeStreaming(
 export async function downloadGeneratedFiles(
   client: Anthropic,
   files: CodeExecutionFile[],
-  outputDir: string = "."
+  outputDir: string = ".",
+  apiKey?: string
 ): Promise<string[]> {
   const downloadedPaths: string[] = [];
 
@@ -553,7 +571,7 @@ export async function downloadGeneratedFiles(
       const response = await fetch(url, {
         method: "GET",
         headers: {
-          "x-api-key": process.env.ANTHROPIC_API_KEY || "",
+          "x-api-key": apiKey || process.env.ANTHROPIC_API_KEY || "",
           "anthropic-version": "2023-06-01",
           "anthropic-beta": "files-api-2025-04-14",
         },
@@ -625,4 +643,165 @@ export async function streamChatWithClaude(
 
   await stream.finalMessage();
   return fullText;
+}
+
+/**
+ * Multi-turn code execution with Claude.
+ *
+ * Pass the returned `messages` array back on subsequent calls to continue
+ * the conversation. The container is reused automatically.
+ */
+export async function executeCodeWithClaudeMultiTurn(
+  client: Anthropic,
+  userMessage: string,
+  onEvent: (event: StreamEvent) => void,
+  previousMessages?: ConversationMessage[],
+  options?: CodeExecutionOptions
+): Promise<MultiTurnCodeResult> {
+  // Build the raw messages array for the API.
+  // Previous turns use the raw content blocks we stored; new turn is plain text.
+  const rawMessages: any[] = [];
+
+  if (previousMessages) {
+    for (const msg of previousMessages) {
+      rawMessages.push({ role: msg.role, content: msg.content });
+    }
+  }
+
+  rawMessages.push({ role: "user", content: userMessage });
+
+  const model = options?.model ?? "claude-sonnet-4-5-20250929";
+  const maxTokens = options?.maxTokens ?? 8192;
+
+  const requestParams: any = {
+    model,
+    max_tokens: maxTokens,
+    messages: rawMessages,
+    tools: [
+      {
+        type: "code_execution_20250825",
+        name: "code_execution",
+      },
+    ],
+  };
+
+  if (options?.fileIds?.length) {
+    requestParams.betas = ["files-api-2025-04-14"];
+  }
+
+  if (options?.containerId) {
+    requestParams.container = options.containerId;
+  }
+
+  const stream = await (requestParams.betas
+    ? client.beta.messages.stream(requestParams)
+    : client.messages.stream(requestParams));
+
+  let fullText = "";
+  const files: CodeExecutionFile[] = [];
+  const codeArtifacts: CodeArtifact[] = [];
+  let containerId: string | undefined = options?.containerId;
+  let currentToolName: string | undefined;
+  let currentToolId: string | undefined;
+  let currentToolInput = "";
+  let lastExtractedCodeLength = 0;
+  const toolInputs: Map<string, { name: string; input: string }> = new Map();
+
+  for await (const event of stream) {
+    if (event.type === "message_start") {
+      if ((event as any).message?.container?.id) {
+        containerId = (event as any).message.container.id;
+      }
+    } else if (event.type === "content_block_start") {
+      const block = (event as any).content_block;
+      if (block?.type === "server_tool_use") {
+        currentToolName = block.name;
+        currentToolId = block.id;
+        currentToolInput = "";
+        lastExtractedCodeLength = 0;
+        onEvent({ type: "tool_start", toolName: block.name });
+      }
+    } else if (event.type === "content_block_delta") {
+      const delta = (event as any).delta;
+      if (delta?.type === "text_delta") {
+        fullText += delta.text;
+        onEvent({ type: "text", text: delta.text });
+      } else if (delta?.type === "input_json_delta") {
+        currentToolInput += delta.partial_json || "";
+        if (currentToolName === "text_editor_code_execution") {
+          const { newCode, totalLength } = extractCodeFromPartialJson(
+            currentToolInput,
+            lastExtractedCodeLength
+          );
+          lastExtractedCodeLength = totalLength;
+          if (newCode) onEvent({ type: "tool_input", text: newCode });
+        } else {
+          onEvent({ type: "tool_input", text: delta.partial_json });
+        }
+      }
+    } else if (event.type === "content_block_stop") {
+      if (currentToolName && currentToolId) {
+        toolInputs.set(currentToolId, { name: currentToolName, input: currentToolInput });
+        onEvent({ type: "tool_end", toolName: currentToolName });
+        currentToolName = undefined;
+        currentToolId = undefined;
+        currentToolInput = "";
+        lastExtractedCodeLength = 0;
+      }
+    }
+  }
+
+  for (const [toolId, tool] of toolInputs) {
+    if (tool.name === "text_editor_code_execution" && tool.input) {
+      try {
+        const input = JSON.parse(tool.input);
+        if (input?.command === "create" && input?.path && input?.file_text) {
+          codeArtifacts.push({
+            id: toolId,
+            path: input.path,
+            code: input.file_text,
+            language: inferLanguage(input.path),
+          });
+        }
+      } catch (e) { /* skip */ }
+    }
+  }
+
+  const finalMessage = await stream.finalMessage();
+
+  if ((finalMessage as any).container?.id) {
+    containerId = (finalMessage as any).container.id;
+  }
+
+  for (const block of finalMessage.content) {
+    if ((block as any).type === "bash_code_execution_tool_result") {
+      const result = (block as any).content;
+      if (result?.type === "bash_code_execution_result" && Array.isArray(result.content)) {
+        for (const item of result.content) {
+          if (item.type === "bash_code_execution_output" && item.file_id) {
+            files.push({
+              file_id: item.file_id,
+              filename: item.filename || `file_${item.file_id.slice(-8)}.png`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Build the updated conversation history.
+  // We store the raw content blocks so the API gets them back verbatim.
+  const updatedMessages: ConversationMessage[] = previousMessages
+    ? [...previousMessages]
+    : [];
+  updatedMessages.push({ role: "user", content: userMessage });
+  updatedMessages.push({ role: "assistant", content: finalMessage.content as any });
+
+  return {
+    text: fullText,
+    files,
+    codeArtifacts,
+    containerId,
+    messages: updatedMessages,
+  };
 }

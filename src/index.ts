@@ -16,6 +16,7 @@ export {
   deleteFile as deleteClaudeFile,
   executeCodeWithClaude,
   executeCodeWithClaudeStreaming,
+  executeCodeWithClaudeMultiTurn,
   downloadGeneratedFiles as downloadClaudeFiles,
   chatWithClaude,
   streamChatWithClaude,
@@ -29,6 +30,7 @@ export {
   deleteFile as deleteOpenAIFile,
   executeCodeWithOpenAI,
   executeCodeWithOpenAIStreaming,
+  executeCodeWithOpenAIMultiTurn,
   downloadGeneratedFiles as downloadOpenAIFiles,
   chatWithOpenAI,
   streamChatWithOpenAI,
@@ -36,3 +38,6 @@ export {
 
 // Export Langfuse client
 export * from "./modules/langfuse-client.js";
+
+// Export Key Pool
+export * from "./modules/key-pool.js";

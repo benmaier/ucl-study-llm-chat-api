@@ -84,3 +84,21 @@ export interface ChatOptions {
   maxTokens?: number;
   system?: string;
 }
+
+/**
+ * A message in a multi-turn conversation (provider-agnostic)
+ */
+export interface ConversationMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
+ * Result from a multi-turn code execution, including the updated conversation history
+ */
+export interface MultiTurnCodeResult extends CodeExecutionResult {
+  /** Updated messages array including the assistant's response — pass back for next turn */
+  messages: ConversationMessage[];
+  /** For OpenAI Responses API: the response ID to chain with previous_response_id */
+  responseId?: string;
+}

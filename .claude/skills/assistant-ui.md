@@ -34,7 +34,7 @@ npm install @assistant-ui/react @assistant-ui/react-ai-sdk @assistant-ui/react-u
 | Package | Purpose |
 |---------|---------|
 | `@assistant-ui/react` | Core runtime and primitives |
-| `@assistant-ui/react-ai-sdk` | Vercel AI SDK v5 integration |
+| `@assistant-ui/react-ai-sdk` | AI SDK v5 integration |
 | `@assistant-ui/react-ui` | Pre-built styled components |
 
 ## Architecture
@@ -189,7 +189,7 @@ import { ThreadPrimitive } from "@assistant-ui/react";
 
 ## Provider Support
 
-assistant-ui works with any provider supported by Vercel AI SDK:
+assistant-ui works with any provider supported by AI SDK:
 - OpenAI
 - Anthropic
 - Google Gemini

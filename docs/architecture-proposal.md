@@ -24,7 +24,7 @@ A desktop application for research participants to interact with AI assistants (
 - Students could use the keys outside the lab
 - This would incur unexpected costs and compromise the study
 
-**Solution:** A secure architecture that keeps API keys on our servers, not on participant machines.
+**Solution:** API keys are stored in a PostgreSQL database and distributed to participants at login via a secure database function. Participants never see or have direct access to the key table.
 
 ---
 
@@ -43,49 +43,28 @@ A desktop application for research participants to interact with AI assistants (
 ┌─────────────────────────────────────────────────────────────────┐
 │                      CLOUD SERVICES                             │
 │                                                                 │
-│   ┌─────────────┐        ┌─────────────┐        ┌───────────┐   │
-│   │   Vercel    │───────▶│   Claude    │        │  Admin    │   │
-│   │   Proxy     │───────▶│   OpenAI    │        │  Panel    │   │
-│   │  (Gateway)  │        │   APIs      │        │  (Web)    │   │
-│   └──────┬──────┘        └─────────────┘        └─────┬─────┘   │
-│          │                                            │         │
-│          │         ┌─────────────────┐                │         │
-│          └────────▶│    Scaleway     │◀───────────────┘         │
-│                    │    Database     │                          │
-│                    │   (PostgreSQL)  │◀──── Desktop Apps        │
-│                    └─────────────────┘       (direct connection)│
+│   ┌─────────────────┐                          ┌───────────┐   │
+│   │    Scaleway     │   assign_api_key()        │  Admin    │   │
+│   │    Database     │──────────────────────┐    │  Panel    │   │
+│   │   (PostgreSQL)  │                      │    │  (Web)    │   │
+│   └────────┬────────┘                      │    └─────┬─────┘   │
+│            │                               │          │         │
+│            │  ┌─────────────┐              │          │         │
+│            │  │   Claude    │◀─────────────┤          │         │
+│            └─▶│   OpenAI    │  (direct API │          │         │
+│               │   APIs      │   calls with │          │         │
+│               └─────────────┘   pool keys) │          │         │
+│                                            │          │         │
+│            Desktop Apps ───────────────────▶│          │         │
+│            (direct DB connection)           │          │         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## Slide 4: What is Vercel?
-
-**Vercel** is a cloud platform for hosting web applications and serverless functions.
-
-**Think of it as:** A middleman that receives requests, does something with them, and passes them on.
-
-**Why we use it:**
-
-| Feature | Benefit |
-|---------|---------|
-| Serverless functions | Only runs (and costs money) when actually used |
-| Auto-scaling | Handles 1 or 100 participants without configuration |
-| HTTPS included | Secure connections out of the box |
-| Simple deployment | Push code to GitHub → automatically deployed |
-
-**Our use:** A simple "proxy" that:
-1. Receives requests from the desktop app
-2. Checks if the participant token is valid
-3. Adds the real API key
-4. Forwards to Claude/OpenAI
-5. Returns the response
-
-**Cost:** Free tier sufficient for this project (~100 hours/month compute)
+**Flow:** Desktop App → Scaleway DB → `assign_api_key()` → APIs directly
 
 ---
 
-## Slide 5: What is Scaleway?
+## Slide 4: What is Scaleway?
 
 **Scaleway** is a European cloud provider based in Paris, France.
 
@@ -102,6 +81,7 @@ A desktop application for research participants to interact with AI assistants (
 
 **Our use:** PostgreSQL database storing:
 - Participant accounts
+- API key pools (securely distributed at login)
 - Conversation logs
 - Generated files (images, code, etc.)
 
@@ -109,14 +89,15 @@ A desktop application for research participants to interact with AI assistants (
 
 ---
 
-## Slide 6: Security Model
+## Slide 5: Security Model
 
 ### Three Layers of Protection
 
-**Layer 1: API Proxy**
-- Real API keys stored only on Vercel (never on participant machines)
-- Participants use "lab tokens" that only work through our proxy
-- Tokens can be deactivated instantly
+**Layer 1: Database Key Pool**
+- Real API keys stored only in the database (never on participant machines)
+- Participants call a `SECURITY DEFINER` function to get a key at login
+- They cannot directly query the `api_keys` table
+- Keys are load-balanced across participants and usage is audited
 
 **Layer 2: Database Authentication**
 - Each participant gets unique database username/password
@@ -129,33 +110,38 @@ A desktop application for research participants to interact with AI assistants (
 - Participant A cannot see Participant B's conversations, even if they try
 
 ```
-Participant_001 runs: SELECT * FROM messages;
-Database returns:     Only Participant_001's messages (automatic filtering)
+Participant_001 runs: SELECT * FROM api_keys;
+Database returns:     ERROR: permission denied for table api_keys
+
+Participant_001 runs: SELECT assign_api_key('anthropic');
+Database returns:     sk-ant-...  (least-used key for their condition)
 ```
 
 ---
 
-## Slide 7: Data Flow - During Experiment
+## Slide 6: Data Flow - During Experiment
 
 ```
 1. Participant logs into desktop app
    └─▶ App connects to database with participant credentials
+       └─▶ App calls assign_api_key() to get API keys for their condition
+           └─▶ Keys cached in memory for the session
 
 2. Participant sends message to AI
-   └─▶ App sends request to Vercel proxy (with lab token)
-       └─▶ Proxy validates token
-           └─▶ Proxy adds real API key
-               └─▶ Request sent to Claude/OpenAI
-                   └─▶ Response streamed back to app
+   └─▶ App calls Claude/OpenAI API directly (using pool key)
+       └─▶ Response streamed back to app
 
 3. Conversation logged automatically
    └─▶ App saves message + response to database
        └─▶ Any generated files (images, code) saved as well
+
+4. If an API becomes unreachable mid-session
+   └─▶ App can switch to another provider via keyPool.switchProvider()
 ```
 
 ---
 
-## Slide 8: Admin Panel (Researcher Interface)
+## Slide 7: Admin Panel (Researcher Interface)
 
 A simple web application for researchers to manage the study.
 
@@ -164,8 +150,9 @@ A simple web application for researchers to manage the study.
 | Function | Description |
 |----------|-------------|
 | **Participant Management** | Create accounts, generate credentials, assign to conditions |
-| **Token Management** | Generate/revoke API access tokens |
-| **Session Monitoring** | See active sessions, usage statistics |
+| **Condition Management** | Define experiment conditions (claude-only, openai-only, both) |
+| **Key Pool Management** | Add/remove API keys, assign to condition pools |
+| **Session Monitoring** | See active sessions, key assignment audit log |
 | **Data Export** | Download conversations, artifacts for analysis |
 | **Experiment Control** | Enable/disable access for all participants |
 
@@ -181,18 +168,18 @@ The admin panel connects to the same Scaleway database with full access privileg
 
 ---
 
-## Slide 9: What Researchers Control
+## Slide 8: What Researchers Control
 
 | Before Experiment | During Experiment | After Experiment |
 |-------------------|-------------------|------------------|
 | Create participant accounts | Monitor active sessions | Export all data |
-| Generate unique credentials | View usage statistics | Analyze conversations |
-| Configure experiment conditions | Revoke access if needed | Download artifacts |
+| Define experiment conditions | View key usage statistics | Analyze conversations |
+| Configure API key pools | Revoke access if needed | Download artifacts |
 | Set token expiration dates | See errors/issues | Generate reports |
 
 ---
 
-## Slide 10: Desktop Application
+## Slide 9: Desktop Application
 
 **Technology:** Electron (cross-platform: Windows, Mac, Linux)
 
@@ -211,11 +198,11 @@ The admin panel connects to the same Scaleway database with full access privileg
 **What participants cannot do:**
 - Access other participants' data
 - Use the AI outside the app
-- Extract API credentials
+- Extract API credentials (keys exist only in DB and in-memory during session)
 
 ---
 
-## Slide 11: Data Storage
+## Slide 10: Data Storage
 
 ### What Gets Stored
 
@@ -226,6 +213,7 @@ The admin panel connects to the same Scaleway database with full access privileg
 | Images | Database (binary) | Charts, plots generated by AI |
 | Code files | Database (binary) | Python scripts, CSVs created |
 | Participant info | Database (text) | Username, condition, session times |
+| Key assignments | Database (audit log) | Which key was assigned to whom and when |
 
 ### Storage Estimate
 
@@ -241,12 +229,11 @@ The admin panel connects to the same Scaleway database with full access privileg
 
 ---
 
-## Slide 12: Cost Summary
+## Slide 11: Cost Summary
 
 | Service | Purpose | Monthly Cost |
 |---------|---------|--------------|
-| **Scaleway Database** | Data storage, auth | €15-25 |
-| **Vercel Proxy** | API gateway | €0 (free tier) |
+| **Scaleway Database** | Data storage, auth, key pool | €15-25 |
 | **Claude API** | AI responses | Variable* |
 | **OpenAI API** | AI responses | Variable* |
 
@@ -256,16 +243,16 @@ The admin panel connects to the same Scaleway database with full access privileg
 
 ---
 
-## Slide 13: Compliance & Ethics
+## Slide 12: Compliance & Ethics
 
 ### GDPR Compliance
 
-✅ Data stored in EU (Paris, France)
-✅ European company (Scaleway)
-✅ No US CLOUD Act exposure
-✅ Data isolation between participants
-✅ Full audit trail
-✅ Data export capability
+- Data stored in EU (Paris, France)
+- European company (Scaleway)
+- No US CLOUD Act exposure
+- Data isolation between participants
+- Full audit trail
+- Data export capability
 
 ### For Ethics Application
 
@@ -273,16 +260,17 @@ The admin panel connects to the same Scaleway database with full access privileg
 - Participant data isolation guaranteed by database
 - No third-party access to conversation data
 - API providers only see anonymized requests (no participant identifiers)
+- API keys are never stored on participant machines
 
 ---
 
-## Slide 14: Implementation Timeline
+## Slide 13: Implementation Timeline
 
 | Phase | Tasks | Duration |
 |-------|-------|----------|
-| **1. Infrastructure** | Set up Scaleway DB, Vercel proxy | 1 week |
+| **1. Infrastructure** | Set up Scaleway DB, key pools, conditions | 1 week |
 | **2. Desktop App** | Build Electron app with chat interface | 2-3 weeks |
-| **3. Admin Panel** | Participant/token management | 1 week |
+| **3. Admin Panel** | Participant/token/key pool management | 1 week |
 | **4. Testing** | Security testing, load testing | 1 week |
 | **5. Pilot** | Small-scale trial run | 1 week |
 
@@ -290,37 +278,38 @@ The admin panel connects to the same Scaleway database with full access privileg
 
 ---
 
-## Slide 15: Summary
+## Slide 14: Summary
 
 ### What We're Proposing
 
-1. **Secure API access** via Vercel proxy (keys never on participant machines)
+1. **Secure API access** via database key pool (keys never on participant machines)
 2. **EU-hosted database** on Scaleway (GDPR compliant)
 3. **Per-participant isolation** via PostgreSQL Row-Level Security
-4. **Simple admin panel** for researcher control
-5. **Cross-platform desktop app** for participants
+4. **Experiment conditions** with per-condition API key pools
+5. **Simple admin panel** for researcher control
+6. **Cross-platform desktop app** for participants
 
 ### Key Benefits
 
-- ✅ Participants cannot steal API credentials
-- ✅ All data stays in EU
-- ✅ Complete conversation logging for research
-- ✅ Low infrastructure cost (~€20/month)
-- ✅ Researchers have full control
+- Participants cannot steal API credentials
+- All data stays in EU
+- Complete conversation logging for research
+- Low infrastructure cost (~€20/month)
+- Researchers have full control
+- No external proxy service needed — simpler architecture
 
 ---
 
-## Slide 16: Questions?
+## Slide 15: Questions?
 
 ### Documentation Available
 
-- `proxy-plan.md` - Technical details of API proxy
-- `database-plan.md` - Database schema and security
+- `database-plan.md` - Database schema, key pool, and security
 - `anthropic-client-module.md` - Claude API integration
 - `openai-client-module.md` - OpenAI API integration
 
 ### Next Steps
 
 1. Confirm requirements
-2. Set up cloud accounts (Scaleway, Vercel)
+2. Set up Scaleway cloud account
 3. Begin development

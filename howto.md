@@ -210,7 +210,7 @@ When using the streaming functions, you get real-time events:
 | `code_complete` | Code finished |
 | `tool_end` | Code execution completed |
 
-**Note on Claude streaming:** The module uses the `fine-grained-tool-streaming-2025-05-14` beta header to enable incremental code streaming. Without this, Claude's API buffers tool inputs and sends them all at once after validation, causing 10-15 second delays.
+**Note on Claude streaming:** The module uses `eager_input_streaming: true` on the code execution tool to enable incremental code streaming. Without this, Claude's API buffers tool inputs and sends them all at once after validation, causing delays.
 
 ## Costs
 
@@ -237,11 +237,69 @@ Run `npm run build` to compile. Check that you have the latest dependencies with
 ### API errors
 - Check your API key is valid
 - Check you have credits/billing set up
-- Claude code execution requires beta access
+- Claude code execution requires an active API account
+
+## Key Pool (Database-Based API Keys)
+
+For the research experiment, API keys are not stored in `.env` files on participant machines. Instead, they're fetched from a PostgreSQL database at login via a secure key pool.
+
+### How It Works
+
+1. Multiple API keys per provider are stored in the database
+2. Keys are organized into per-condition pools (e.g., "claude-only", "openai-only", "both")
+3. Each participant is assigned to a condition
+4. At login, the app calls a database function that returns the least-used key for their condition
+5. Keys are cached in memory for the session
+
+### Usage
+
+```typescript
+import { Pool } from "pg";
+import { createKeyPool, createAnthropicClient, createOpenAIClient } from "test-native-apis";
+
+// Connect to database with participant credentials
+const dbPool = new Pool({
+  host: "your-db.scw.cloud",
+  port: 5432,
+  database: "research_db",
+  user: "participant_001",
+  password: "random_password_001",
+  ssl: { rejectUnauthorized: false },
+});
+
+// Create key pool and fetch keys
+const keyPool = createKeyPool(dbPool);
+await keyPool.fetchKeys();  // fetches for all available providers
+
+// Check what's available
+console.log("Providers:", keyPool.getAvailableProviders());  // e.g., ["anthropic"]
+console.log("Condition:", keyPool.getCondition());            // e.g., { id: 1, name: "claude-only" }
+
+// Create clients with pool keys
+const anthropicKey = keyPool.getKey("anthropic");
+if (anthropicKey) {
+  const client = createAnthropicClient(anthropicKey);
+  // Use client as normal...
+}
+
+const openaiKey = keyPool.getKey("openai");
+if (openaiKey) {
+  const client = createOpenAIClient(openaiKey);
+  // Use client as normal...
+}
+
+// Mid-session provider switch (if one API goes down)
+const fallbackKey = await keyPool.switchProvider("openai");
+```
+
+### Backward Compatibility
+
+All client functions still fall back to `process.env` when no `apiKey` parameter is provided. Existing code using `.env` files continues to work unchanged.
 
 ## Next Steps
 
 - Read `docs/anthropic-client-module.md` for detailed Claude API usage
 - Read `docs/openai-client-module.md` for detailed OpenAI API usage
+- Read `docs/database-plan.md` for the database schema and key pool design
 - Look at the test files for working examples
 - Try modifying the prompts to generate different visualizations
