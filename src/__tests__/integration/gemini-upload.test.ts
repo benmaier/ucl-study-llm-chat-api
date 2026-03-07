@@ -2,15 +2,19 @@ import {
   createGeminiClient,
   uploadFile,
   executeCodeWithGemini,
+  executeCodeWithGeminiStreaming,
   downloadGeneratedFiles,
   deleteFile,
 } from "../../modules/gemini-client.js";
+import type { StreamEvent } from "../../modules/types.js";
 import { resolve } from "path";
 import { existsSync } from "fs";
 
 const HAS_KEY = !!process.env.GOOGLE_API_KEY;
 const TEST_CSV_PATH = resolve(process.cwd(), "test-data/sample.csv");
 const HAS_CSV = existsSync(TEST_CSV_PATH);
+
+const PLOT_PROMPT = "Read the uploaded CSV file and create a scatter plot of x vs y. Save the plot as plot.png.";
 
 describe.skipIf(!HAS_KEY || !HAS_CSV)("Gemini file upload + code execution", () => {
   it("should upload, execute, download, and cleanup", async () => {
@@ -21,14 +25,42 @@ describe.skipIf(!HAS_KEY || !HAS_CSV)("Gemini file upload + code execution", () 
     expect(uploaded.file_id).toBeTruthy();
     expect(uploaded.filename).toBeTruthy();
 
-    // Execute
-    const result = await executeCodeWithGemini(
+    // Execute (non-streaming)
+    const result = await executeCodeWithGemini(client, PLOT_PROMPT, {
+      fileIds: [uploaded.file_id],
+    });
+    expect(result.text).toBeTruthy();
+    expect(result.codeArtifacts.length).toBeGreaterThan(0);
+
+    // Download (base64 inline files)
+    if (result.files.length > 0) {
+      const paths = await downloadGeneratedFiles(result.files, "/tmp");
+      expect(paths.length).toBeGreaterThan(0);
+    }
+
+    // Cleanup
+    await deleteFile(client, uploaded.file_id);
+  });
+
+  it("should upload, execute with streaming, download, and cleanup", async () => {
+    const client = createGeminiClient();
+    const events: StreamEvent[] = [];
+
+    // Upload
+    const uploaded = await uploadFile(client, TEST_CSV_PATH);
+    expect(uploaded.file_id).toBeTruthy();
+
+    // Execute (streaming)
+    const result = await executeCodeWithGeminiStreaming(
       client,
-      "Read the uploaded CSV file and create a scatter plot of x vs y. Save the plot as plot.png.",
+      PLOT_PROMPT,
+      (event) => { events.push(event); },
       { fileIds: [uploaded.file_id] }
     );
     expect(result.text).toBeTruthy();
     expect(result.codeArtifacts.length).toBeGreaterThan(0);
+    expect(events.some(e => e.type === "text")).toBe(true);
+    expect(events.some(e => e.type === "tool_start")).toBe(true);
 
     // Download (base64 inline files)
     if (result.files.length > 0) {
