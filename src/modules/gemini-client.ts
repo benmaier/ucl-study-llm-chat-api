@@ -22,47 +22,7 @@ import type {
   CodeExecutionOptions,
   ChatOptions,
 } from "./types.js";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function inferMimeType(filename: string): string {
-  const ext = filename.split(".").pop()?.toLowerCase();
-  const mimeTypes: Record<string, string> = {
-    csv: "text/csv",
-    json: "application/json",
-    txt: "text/plain",
-    md: "text/markdown",
-    pdf: "application/pdf",
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    webp: "image/webp",
-    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    xls: "application/vnd.ms-excel",
-    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    py: "text/x-python",
-    js: "text/javascript",
-    ts: "text/typescript",
-  };
-  return mimeTypes[ext || ""] || "application/octet-stream";
-}
-
-function mimeToExtension(mimeType: string): string {
-  const map: Record<string, string> = {
-    "image/png": "png",
-    "image/jpeg": "jpg",
-    "image/gif": "gif",
-    "image/webp": "webp",
-    "text/plain": "txt",
-    "text/csv": "csv",
-    "application/json": "json",
-    "application/pdf": "pdf",
-  };
-  return map[mimeType] || "bin";
-}
+import { inferMimeType, mimeToExtension } from "./helpers.js";
 
 // ---------------------------------------------------------------------------
 // Client creation

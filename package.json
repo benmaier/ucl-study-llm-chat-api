@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "test": "vitest run",
+    "test:unit": "vitest run src/__tests__/unit",
+    "test:integration": "vitest run src/__tests__/integration",
+    "test:watch": "vitest",
     "test:anthropic": "npx tsx src/test/test-anthropic.ts",
     "test:anthropic:debug": "npx tsx src/test/test-anthropic-debug.ts",
     "test:anthropic:upload": "npx tsx src/test/test-anthropic-file-upload.ts",
@@ -30,6 +34,7 @@
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.0.18"
   }
 }

@@ -20,6 +20,7 @@ import {
   ConversationMessage,
   MultiTurnCodeResult,
 } from "./types.js";
+import { inferMimeType } from "./helpers.js";
 
 // Re-export types for convenience
 export type {
@@ -104,32 +105,6 @@ export async function deleteFile(
   fileId: string
 ): Promise<void> {
   await client.files.del(fileId);
-}
-
-/**
- * Infer MIME type from filename
- */
-function inferMimeType(filename: string): string {
-  const ext = filename.split(".").pop()?.toLowerCase();
-  const mimeTypes: Record<string, string> = {
-    csv: "text/csv",
-    json: "application/json",
-    txt: "text/plain",
-    md: "text/markdown",
-    pdf: "application/pdf",
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    webp: "image/webp",
-    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    xls: "application/vnd.ms-excel",
-    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    py: "text/x-python",
-    js: "text/javascript",
-    ts: "text/typescript",
-  };
-  return mimeTypes[ext || ""] || "application/octet-stream";
 }
 
 /**

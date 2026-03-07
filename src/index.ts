@@ -8,6 +8,9 @@
 // Export shared types
 export * from "./modules/types.js";
 
+// Export shared helpers
+export * from "./modules/helpers.js";
+
 // Export Anthropic client functions
 export {
   createAnthropicClient,

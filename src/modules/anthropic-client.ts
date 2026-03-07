@@ -20,6 +20,7 @@ import {
   ConversationMessage,
   MultiTurnCodeResult,
 } from "./types.js";
+import { inferMimeType, inferLanguage, extractCodeFromPartialJson } from "./helpers.js";
 
 // Re-export types for convenience
 export type {
@@ -33,29 +34,6 @@ export type {
   ConversationMessage,
   MultiTurnCodeResult,
 } from "./types.js";
-
-/**
- * Infer programming language from file path
- */
-function inferLanguage(path: string): string {
-  const ext = path.split(".").pop()?.toLowerCase();
-  const langMap: Record<string, string> = {
-    py: "python",
-    js: "javascript",
-    ts: "typescript",
-    rb: "ruby",
-    go: "go",
-    rs: "rust",
-    java: "java",
-    cpp: "cpp",
-    c: "c",
-    sh: "bash",
-    sql: "sql",
-    r: "r",
-    jl: "julia",
-  };
-  return langMap[ext || ""] || "python";
-}
 
 /**
  * Create Anthropic client
@@ -180,32 +158,6 @@ export async function deleteFile(
 }
 
 /**
- * Infer MIME type from filename
- */
-function inferMimeType(filename: string): string {
-  const ext = filename.split(".").pop()?.toLowerCase();
-  const mimeTypes: Record<string, string> = {
-    csv: "text/csv",
-    json: "application/json",
-    txt: "text/plain",
-    md: "text/markdown",
-    pdf: "application/pdf",
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    webp: "image/webp",
-    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    xls: "application/vnd.ms-excel",
-    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    py: "text/x-python",
-    js: "text/javascript",
-    ts: "text/typescript",
-  };
-  return mimeTypes[ext || ""] || "application/octet-stream";
-}
-
-/**
  * Execute code with Claude's code execution tool (non-streaming)
  */
 export async function executeCodeWithClaude(
@@ -304,65 +256,6 @@ export async function executeCodeWithClaude(
   }
 
   return { text, files, codeArtifacts, containerId };
-}
-
-/**
- * Helper to extract code from incrementally building JSON
- * Handles the text_editor_code_execution format: {"command":"create","path":"...","file_text":"..."}
- */
-function extractCodeFromPartialJson(
-  jsonSoFar: string,
-  lastExtractedLength: number
-): { newCode: string; totalLength: number } {
-  // Look for the file_text field and extract its value
-  const fileTextMatch = jsonSoFar.match(/"file_text"\s*:\s*"/);
-  if (!fileTextMatch) {
-    return { newCode: "", totalLength: lastExtractedLength };
-  }
-
-  const startIndex = fileTextMatch.index! + fileTextMatch[0].length;
-
-  // Find the end of the string value (unescaped quote)
-  // We need to find content between "file_text":" and the closing "
-  // But we also need to handle escaped quotes within the string
-  let content = "";
-  let i = startIndex;
-  while (i < jsonSoFar.length) {
-    const char = jsonSoFar[i];
-    if (char === "\\") {
-      // Escape sequence - grab next char too
-      if (i + 1 < jsonSoFar.length) {
-        const nextChar = jsonSoFar[i + 1];
-        // Handle common escape sequences
-        if (nextChar === "n") {
-          content += "\n";
-        } else if (nextChar === "t") {
-          content += "\t";
-        } else if (nextChar === "r") {
-          content += "\r";
-        } else if (nextChar === '"') {
-          content += '"';
-        } else if (nextChar === "\\") {
-          content += "\\";
-        } else {
-          content += nextChar;
-        }
-        i += 2;
-        continue;
-      }
-      break; // Incomplete escape at end
-    } else if (char === '"') {
-      // End of string value
-      break;
-    } else {
-      content += char;
-      i++;
-    }
-  }
-
-  // Return only the new portion since last extraction
-  const newCode = content.slice(lastExtractedLength);
-  return { newCode, totalLength: content.length };
 }
 
 /**
