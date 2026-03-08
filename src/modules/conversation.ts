@@ -227,6 +227,9 @@ export class Conversation {
    * @param data - A `SerializedConversation` snapshot (from a Writer, file, or DB).
    * @param options.apiKey - API key for the target provider.
    * @param options.provider - Override provider (triggers provider switch if different).
+   * @param options.model - Override model (e.g. "gpt-4o" when switching to OpenAI).
+   *   Falls back to the model saved in the snapshot.
+   * @param options.maxTokens - Override max tokens. Falls back to the snapshot value.
    * @param options.writers - Writers to attach to the resumed conversation.
    * @param options.metadata - Override metadata (otherwise restored from snapshot).
    * @returns The reconstructed Conversation, ready for `send()`.
@@ -236,6 +239,8 @@ export class Conversation {
     options: {
       apiKey?: string;
       provider?: Provider;
+      model?: string;
+      maxTokens?: number;
       writers?: ConversationWriter[];
       metadata?: Record<string, any>;
     } = {}
@@ -248,8 +253,8 @@ export class Conversation {
     const conv = new Conversation({
       provider: targetProvider,
       apiKey: options.apiKey,
-      model: validated.model,
-      maxTokens: validated.maxTokens,
+      model: options.model ?? validated.model,
+      maxTokens: options.maxTokens ?? validated.maxTokens,
       id: validated.id,
       metadata: options.metadata ?? validated.metadata,
     });
@@ -293,6 +298,8 @@ export class Conversation {
     options: {
       apiKey?: string;
       provider?: Provider;
+      model?: string;
+      maxTokens?: number;
       writers?: ConversationWriter[];
       metadata?: Record<string, any>;
     } = {}
