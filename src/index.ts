@@ -56,6 +56,11 @@ export {
 // Export Conversation class
 export { Conversation } from "./modules/conversation.js";
 
+// Export conversation persistence
+export * from "./modules/conversation-store.js";
+export { ConversationWriter } from "./modules/conversation-writer.js";
+export { FileWriter } from "./modules/file-writer.js";
+
 // Export Langfuse client
 export * from "./modules/langfuse-client.js";
 

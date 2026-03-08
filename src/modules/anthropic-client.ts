@@ -489,6 +489,34 @@ export async function downloadGeneratedFiles(
 }
 
 /**
+ * Download a single generated file to a Buffer (without writing to disk).
+ * Used internally for capturing base64 data for persistence.
+ */
+export async function downloadFileToBuffer(
+  client: Anthropic,
+  file: { file_id: string }
+): Promise<{ buffer: Buffer; mimeType?: string }> {
+  const url = `https://api.anthropic.com/v1/files/${file.file_id}/content`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "x-api-key": client.apiKey || "",
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "files-api-2025-04-14",
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const mimeType = response.headers.get("content-type") ?? undefined;
+  return { buffer, mimeType };
+}
+
+/**
  * Simple chat with Claude (no tools)
  */
 export async function chatWithClaude(

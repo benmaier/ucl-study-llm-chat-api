@@ -396,6 +396,30 @@ export async function downloadGeneratedFiles(
 }
 
 /**
+ * Download a single generated file to a Buffer (without writing to disk).
+ * Used internally for capturing base64 data for persistence.
+ */
+export async function downloadFileToBuffer(
+  file: { file_id: string; container_id?: string },
+  apiKey?: string
+): Promise<{ buffer: Buffer; mimeType?: string }> {
+  const url = `https://api.openai.com/v1/containers/${file.container_id}/files/${file.file_id}/content`;
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${apiKey || process.env.OPENAI_API_KEY}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const mimeType = response.headers.get("content-type") ?? undefined;
+  return { buffer, mimeType };
+}
+
+/**
  * Simple chat with OpenAI (no tools)
  */
 export async function chatWithOpenAI(

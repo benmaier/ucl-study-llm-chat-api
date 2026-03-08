@@ -117,6 +117,14 @@ export interface ConversationOptions {
   apiKey?: string;
   model?: string;
   maxTokens?: number;
+  /** Unique conversation ID. Auto-generated (UUID) if omitted. */
+  id?: string;
+  /** Arbitrary metadata (experiment condition, participant ID, etc.) */
+  metadata?: Record<string, any>;
+  /** Writers to notify after each turn (fire-and-forget). */
+  writers?: import("./conversation-writer.js").ConversationWriter[];
+  /** Store base64 of uploaded files for re-upload on provider switch. Default: false. */
+  persistUploadData?: boolean;
 }
 
 /**
