@@ -196,6 +196,29 @@ await downloadGeneratedFiles(result.files, "./output");
 await deleteFile(client, file.file_id);
 ```
 
+**Unified via Conversation class (works with any provider):**
+```typescript
+import { Conversation } from "test-native-apis";
+
+const conv = new Conversation({ provider: "gemini" }); // or "anthropic", "openai"
+
+// Upload
+const file = await conv.uploadFile("./data.csv");
+
+// Execute with file reference
+const result = await conv.send(
+  "Analyze this data",
+  (event) => console.log(event),
+  { fileIds: [file.file_id] }
+);
+
+// Download generated files
+await conv.downloadFiles(result.files, "./output");
+
+// Clean up
+await conv.deleteFile(file.file_id);
+```
+
 ### Streaming Events
 
 When using the streaming functions, you get real-time events:

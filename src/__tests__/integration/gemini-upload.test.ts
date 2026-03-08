@@ -10,7 +10,7 @@ import type { StreamEvent } from "../../modules/types.js";
 import { resolve } from "path";
 import { existsSync } from "fs";
 
-const HAS_KEY = !!process.env.GOOGLE_API_KEY;
+const HAS_KEY = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 const TEST_CSV_PATH = resolve(process.cwd(), "test-data/sample.csv");
 const HAS_CSV = existsSync(TEST_CSV_PATH);
 

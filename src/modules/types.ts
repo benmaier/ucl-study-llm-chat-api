@@ -120,6 +120,13 @@ export interface ConversationOptions {
 }
 
 /**
+ * Options for Conversation.send()
+ */
+export interface SendOptions {
+  fileIds?: string[];
+}
+
+/**
  * Lightweight result from a single conversation turn
  * (internal state like messages/responseId/containerId is managed by the Conversation class)
  */

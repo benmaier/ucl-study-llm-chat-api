@@ -5,7 +5,7 @@ import {
 } from "../../modules/gemini-client.js";
 import type { StreamEvent } from "../../modules/types.js";
 
-const HAS_KEY = !!process.env.GOOGLE_API_KEY;
+const HAS_KEY = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 
 const TEST_PROMPT = `
 Plot the function f(x) = (x-1)^3 - exp(-x) - 5 and compute all its zeros.

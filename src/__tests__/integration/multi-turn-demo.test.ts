@@ -3,7 +3,7 @@ import type { StreamEvent, ConversationOptions } from "../../modules/types.js";
 
 const HAS_ANTHROPIC = !!process.env.ANTHROPIC_API_KEY;
 const HAS_OPENAI = !!process.env.OPENAI_API_KEY;
-const HAS_GEMINI = !!process.env.GOOGLE_API_KEY;
+const HAS_GEMINI = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 
 const TURN_1 = "Plot y = sin(x) * exp(-x/5) for x from 0 to 20. Blue line, grid, title, legend. Save as plot.png.";
 const TURN_2 = "Now change the line to red, and add the analytical derivative as a dashed green line on the same plot. Update the legend and save again.";

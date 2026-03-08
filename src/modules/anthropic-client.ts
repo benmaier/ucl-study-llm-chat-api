@@ -50,8 +50,7 @@ export function createAnthropicClient(apiKey?: string): Anthropic {
 export async function uploadFile(
   client: Anthropic,
   filePath: string,
-  mimeType?: string,
-  apiKey?: string
+  mimeType?: string
 ): Promise<UploadedFile> {
   const fs = await import("fs");
   const path = await import("path");
@@ -69,7 +68,7 @@ export async function uploadFile(
   const response = await fetch("https://api.anthropic.com/v1/files", {
     method: "POST",
     headers: {
-      "x-api-key": apiKey || process.env.ANTHROPIC_API_KEY || "",
+      "x-api-key": client.apiKey || "",
       "anthropic-version": "2023-06-01",
       "anthropic-beta": "files-api-2025-04-14",
     },
@@ -98,8 +97,7 @@ export async function uploadFileFromBuffer(
   client: Anthropic,
   buffer: Buffer,
   filename: string,
-  mimeType?: string,
-  apiKey?: string
+  mimeType?: string
 ): Promise<UploadedFile> {
   const detectedMimeType = mimeType || inferMimeType(filename);
 
@@ -112,7 +110,7 @@ export async function uploadFileFromBuffer(
   const response = await fetch("https://api.anthropic.com/v1/files", {
     method: "POST",
     headers: {
-      "x-api-key": apiKey || process.env.ANTHROPIC_API_KEY || "",
+      "x-api-key": client.apiKey || "",
       "anthropic-version": "2023-06-01",
       "anthropic-beta": "files-api-2025-04-14",
     },
@@ -139,13 +137,12 @@ export async function uploadFileFromBuffer(
  */
 export async function deleteFile(
   client: Anthropic,
-  fileId: string,
-  apiKey?: string
+  fileId: string
 ): Promise<void> {
   const response = await fetch(`https://api.anthropic.com/v1/files/${fileId}`, {
     method: "DELETE",
     headers: {
-      "x-api-key": apiKey || process.env.ANTHROPIC_API_KEY || "",
+      "x-api-key": client.apiKey || "",
       "anthropic-version": "2023-06-01",
       "anthropic-beta": "files-api-2025-04-14",
     },
@@ -439,8 +436,7 @@ export async function executeCodeWithClaudeStreaming(
 export async function downloadGeneratedFiles(
   client: Anthropic,
   files: CodeExecutionFile[],
-  outputDir: string = ".",
-  apiKey?: string
+  outputDir: string = "."
 ): Promise<string[]> {
   const downloadedPaths: string[] = [];
 
@@ -464,7 +460,7 @@ export async function downloadGeneratedFiles(
       const response = await fetch(url, {
         method: "GET",
         headers: {
-          "x-api-key": apiKey || process.env.ANTHROPIC_API_KEY || "",
+          "x-api-key": client.apiKey || "",
           "anthropic-version": "2023-06-01",
           "anthropic-beta": "files-api-2025-04-14",
         },

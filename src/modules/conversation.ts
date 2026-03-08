@@ -13,21 +13,32 @@ import type {
   TurnResult,
   ConversationMessage,
   StreamEvent,
+  SendOptions,
+  UploadedFile,
   CodeExecutionFile,
 } from "./types.js";
 import {
   createAnthropicClient,
   executeCodeWithClaudeMultiTurn,
+  uploadFile as uploadClaudeFile,
+  uploadFileFromBuffer as uploadClaudeFileFromBuffer,
+  deleteFile as deleteClaudeFile,
   downloadGeneratedFiles as downloadClaudeFiles,
 } from "./anthropic-client.js";
 import {
   createOpenAIClient,
   executeCodeWithOpenAIMultiTurn,
+  uploadFile as uploadOpenAIFile,
+  uploadFileFromBuffer as uploadOpenAIFileFromBuffer,
+  deleteFile as deleteOpenAIFile,
   downloadGeneratedFiles as downloadOpenAIFiles,
 } from "./openai-client.js";
 import {
   createGeminiClient,
   executeCodeWithGeminiMultiTurn,
+  uploadFile as uploadGeminiFile,
+  uploadFileFromBuffer as uploadGeminiFileFromBuffer,
+  deleteFile as deleteGeminiFile,
   downloadGeneratedFiles as downloadGeminiFiles,
 } from "./gemini-client.js";
 
@@ -68,22 +79,58 @@ export class Conversation {
     }
   }
 
+  async uploadFile(filePath: string, mimeType?: string): Promise<UploadedFile> {
+    if (this.provider === "anthropic") {
+      return uploadClaudeFile(this.anthropicClient!, filePath, mimeType);
+    } else if (this.provider === "gemini") {
+      return uploadGeminiFile(this.geminiClient!, filePath, mimeType);
+    } else {
+      return uploadOpenAIFile(this.openaiClient!, filePath);
+    }
+  }
+
+  async uploadFileFromBuffer(
+    buffer: Buffer,
+    filename: string,
+    mimeType?: string
+  ): Promise<UploadedFile> {
+    if (this.provider === "anthropic") {
+      return uploadClaudeFileFromBuffer(this.anthropicClient!, buffer, filename, mimeType);
+    } else if (this.provider === "gemini") {
+      return uploadGeminiFileFromBuffer(this.geminiClient!, buffer, filename, mimeType);
+    } else {
+      return uploadOpenAIFileFromBuffer(this.openaiClient!, buffer, filename);
+    }
+  }
+
+  async deleteFile(fileId: string): Promise<void> {
+    if (this.provider === "anthropic") {
+      return deleteClaudeFile(this.anthropicClient!, fileId);
+    } else if (this.provider === "gemini") {
+      return deleteGeminiFile(this.geminiClient!, fileId);
+    } else {
+      return deleteOpenAIFile(this.openaiClient!, fileId);
+    }
+  }
+
   async send(
     message: string,
-    onEvent: (event: StreamEvent) => void
+    onEvent: (event: StreamEvent) => void,
+    options?: SendOptions
   ): Promise<TurnResult> {
     if (this.provider === "anthropic") {
-      return this.sendClaude(message, onEvent);
+      return this.sendClaude(message, onEvent, options);
     } else if (this.provider === "gemini") {
-      return this.sendGemini(message, onEvent);
+      return this.sendGemini(message, onEvent, options);
     } else {
-      return this.sendOpenAI(message, onEvent);
+      return this.sendOpenAI(message, onEvent, options);
     }
   }
 
   private async sendClaude(
     message: string,
-    onEvent: (event: StreamEvent) => void
+    onEvent: (event: StreamEvent) => void,
+    options?: SendOptions
   ): Promise<TurnResult> {
     const result = await executeCodeWithClaudeMultiTurn(
       this.anthropicClient!,
@@ -94,6 +141,7 @@ export class Conversation {
         model: this.model,
         maxTokens: this.maxTokens,
         containerId: this.containerId,
+        fileIds: options?.fileIds,
       }
     );
 
@@ -112,7 +160,8 @@ export class Conversation {
 
   private async sendOpenAI(
     message: string,
-    onEvent: (event: StreamEvent) => void
+    onEvent: (event: StreamEvent) => void,
+    options?: SendOptions
   ): Promise<TurnResult> {
     const result = await executeCodeWithOpenAIMultiTurn(
       this.openaiClient!,
@@ -122,6 +171,7 @@ export class Conversation {
       {
         model: this.model,
         maxTokens: this.maxTokens,
+        fileIds: options?.fileIds,
       }
     );
 
@@ -140,7 +190,8 @@ export class Conversation {
 
   private async sendGemini(
     message: string,
-    onEvent: (event: StreamEvent) => void
+    onEvent: (event: StreamEvent) => void,
+    options?: SendOptions
   ): Promise<TurnResult> {
     const result = await executeCodeWithGeminiMultiTurn(
       this.geminiClient!,
@@ -150,6 +201,7 @@ export class Conversation {
       {
         model: this.model,
         maxTokens: this.maxTokens,
+        fileIds: options?.fileIds,
       }
     );
 

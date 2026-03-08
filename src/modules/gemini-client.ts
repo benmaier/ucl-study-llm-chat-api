@@ -30,7 +30,7 @@ import { inferMimeType, mimeToExtension } from "./helpers.js";
 
 export function createGeminiClient(apiKey?: string): GoogleGenAI {
   return new GoogleGenAI({
-    apiKey: apiKey || process.env.GOOGLE_API_KEY,
+    apiKey: apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
   });
 }
 
@@ -53,7 +53,7 @@ export async function uploadFile(
   });
 
   return {
-    file_id: uploaded.name!,
+    file_id: uploaded.uri!,
     filename: uploaded.displayName || filename,
     mime_type: detectedMimeType,
     size_bytes: Number(uploaded.sizeBytes || 0),
@@ -75,7 +75,7 @@ export async function uploadFileFromBuffer(
   });
 
   return {
-    file_id: uploaded.name!,
+    file_id: uploaded.uri!,
     filename: uploaded.displayName || filename,
     mime_type: detectedMimeType,
     size_bytes: buffer.length,
@@ -86,7 +86,11 @@ export async function deleteFile(
   client: GoogleGenAI,
   fileId: string
 ): Promise<void> {
-  await client.files.delete({ name: fileId });
+  // fileId is a full URI; extract the name (e.g. "files/abc") for the delete API
+  const name = fileId.includes("/files/")
+    ? "files/" + fileId.split("/files/")[1]
+    : fileId;
+  await client.files.delete({ name });
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +108,7 @@ export async function executeCodeWithGemini(
   if (options?.fileIds?.length) {
     for (const fileId of options.fileIds) {
       parts.push({
-        fileData: { fileUri: fileId, mimeType: "application/octet-stream" },
+        fileData: { fileUri: fileId },
       });
     }
   }
@@ -134,7 +138,7 @@ export async function executeCodeWithGeminiStreaming(
   if (options?.fileIds?.length) {
     for (const fileId of options.fileIds) {
       parts.push({
-        fileData: { fileUri: fileId, mimeType: "application/octet-stream" },
+        fileData: { fileUri: fileId },
       });
     }
   }
@@ -168,7 +172,7 @@ export async function executeCodeWithGeminiMultiTurn(
   if (options?.fileIds?.length) {
     for (const fileId of options.fileIds) {
       userParts.push({
-        fileData: { fileUri: fileId, mimeType: "application/octet-stream" },
+        fileData: { fileUri: fileId },
       });
     }
   }

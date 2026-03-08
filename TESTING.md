@@ -39,7 +39,7 @@ Integration tests skip gracefully when keys are missing:
 |-----------|----------------------|
 | Anthropic | `ANTHROPIC_API_KEY`  |
 | OpenAI    | `OPENAI_API_KEY`     |
-| Gemini    | `GOOGLE_API_KEY`     |
+| Gemini    | `GEMINI_API_KEY` or `GOOGLE_API_KEY` |
 
 Set them in `.env` (loaded automatically via `dotenv/config`).
 

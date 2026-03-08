@@ -24,7 +24,7 @@ npm run build
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
-GOOGLE_API_KEY=AI...
+GEMINI_API_KEY=AI...
 ```
 
 ## Quick Start
@@ -57,6 +57,20 @@ const conv = new Conversation({ provider: "anthropic" });
 const r1 = await conv.send("Generate 100 random numbers, save to data.csv", handler);
 const r2 = await conv.send("Read data.csv and compute the mean", handler);
 // r2 can access data.csv from r1's turn
+```
+
+### File Upload via Conversation
+
+```typescript
+import { Conversation } from "test-native-apis";
+
+const conv = new Conversation({ provider: "gemini" }); // works with any provider
+const uploaded = await conv.uploadFile("data.csv");
+const result = await conv.send("Plot the CSV data", handler, {
+  fileIds: [uploaded.file_id],
+});
+await conv.downloadFiles(result.files, "./output");
+await conv.deleteFile(uploaded.file_id);
 ```
 
 ## Project Structure
