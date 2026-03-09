@@ -585,7 +585,20 @@ export async function executeCodeWithClaudeMultiTurn(
     }
   }
 
-  rawMessages.push({ role: "user", content: userMessage });
+  if (options?.fileIds?.length) {
+    rawMessages.push({
+      role: "user",
+      content: [
+        { type: "text", text: userMessage },
+        ...options.fileIds.map((id) => ({
+          type: "container_upload",
+          file_id: id,
+        })),
+      ],
+    });
+  } else {
+    rawMessages.push({ role: "user", content: userMessage });
+  }
 
   const model = options?.model ?? "claude-sonnet-4-5-20250929";
   const maxTokens = options?.maxTokens ?? 8192;

@@ -162,6 +162,24 @@ export async function executeCodeWithOpenAI(
       if (item.container_id) {
         containerId = item.container_id;
       }
+
+      // Extract files from code_interpreter_call results/output
+      const results = item.results || item.output || [];
+      for (const result of results) {
+        if (result.files) {
+          for (const file of result.files) {
+            const exists = files.some((f: CodeExecutionFile) => f.file_id === file.file_id);
+            if (!exists) {
+              files.push({
+                file_id: file.file_id,
+                container_id: item.container_id,
+                filename: file.filename || `generated_${file.file_id}`,
+                mimeType: file.mime_type,
+              });
+            }
+          }
+        }
+      }
     } else if (item.type === "message") {
       for (const content of item.content || []) {
         if (content.type === "output_text") {
@@ -309,8 +327,9 @@ export async function executeCodeWithOpenAIStreaming(
     }
   }
 
-  // Extract code artifacts and any additional files from final response
+  // Extract code artifacts, files, and text from final response
   if (fullResponse?.output) {
+    let responseText = "";
     for (const item of fullResponse.output) {
       if (item.type === "code_interpreter_call") {
         // Extract code artifact
@@ -326,8 +345,29 @@ export async function executeCodeWithOpenAIStreaming(
         if (item.container_id && !containerId) {
           containerId = item.container_id;
         }
+
+        // Extract files from code_interpreter_call results/output
+        const results = item.results || item.output || [];
+        for (const result of results) {
+          if (result.files) {
+            for (const file of result.files) {
+              const exists = files.some((f) => f.file_id === file.file_id);
+              if (!exists) {
+                files.push({
+                  file_id: file.file_id,
+                  container_id: item.container_id,
+                  filename: file.filename || `generated_${file.file_id}`,
+                  mimeType: file.mime_type,
+                });
+              }
+            }
+          }
+        }
       } else if (item.type === "message") {
         for (const content of item.content || []) {
+          if (content.type === "output_text") {
+            responseText += content.text;
+          }
           if (content.annotations) {
             for (const annotation of content.annotations) {
               if (annotation.type === "container_file_citation") {
@@ -346,6 +386,16 @@ export async function executeCodeWithOpenAIStreaming(
         }
       }
     }
+
+    // Use full response text if streaming missed post-tool-call text
+    if (responseText && responseText.length > fullText.length) {
+      fullText = responseText;
+    }
+  }
+
+  // Fallback: use output_text convenience property
+  if (fullResponse?.output_text && fullResponse.output_text.length > fullText.length) {
+    fullText = fullResponse.output_text;
   }
 
   return {
@@ -572,8 +622,9 @@ export async function executeCodeWithOpenAIMultiTurn(
     }
   }
 
-  // Extract code artifacts from final response
+  // Extract code artifacts, files, and text from final response
   if (fullResponse?.output) {
+    let responseText = "";
     for (const item of fullResponse.output) {
       if (item.type === "code_interpreter_call") {
         if (item.code) {
@@ -585,8 +636,29 @@ export async function executeCodeWithOpenAIMultiTurn(
           });
         }
         if (item.container_id && !containerId) containerId = item.container_id;
+
+        // Extract files from code_interpreter_call results/output
+        const results = item.results || item.output || [];
+        for (const result of results) {
+          if (result.files) {
+            for (const file of result.files) {
+              const exists = files.some((f) => f.file_id === file.file_id);
+              if (!exists) {
+                files.push({
+                  file_id: file.file_id,
+                  container_id: item.container_id,
+                  filename: file.filename || `generated_${file.file_id}`,
+                  mimeType: file.mime_type,
+                });
+              }
+            }
+          }
+        }
       } else if (item.type === "message") {
         for (const content of item.content || []) {
+          if (content.type === "output_text") {
+            responseText += content.text;
+          }
           if (content.annotations) {
             for (const annotation of content.annotations) {
               if (annotation.type === "container_file_citation") {
@@ -604,6 +676,16 @@ export async function executeCodeWithOpenAIMultiTurn(
         }
       }
     }
+
+    // Use full response text if streaming missed post-tool-call text
+    if (responseText && responseText.length > fullText.length) {
+      fullText = responseText;
+    }
+  }
+
+  // Fallback: use output_text convenience property
+  if (fullResponse?.output_text && fullResponse.output_text.length > fullText.length) {
+    fullText = fullResponse.output_text;
   }
 
   // Build conversation history for the provider-agnostic interface
