@@ -54,7 +54,7 @@ export interface StreamEvent {
   text?: string;      // Text content (for "text" type)
   code?: string;      // Code content (for "code" and "code_complete" types)
   toolName?: string;  // Tool name (for "tool_start" and "tool_end" types)
-  output?: string;    // Execution output (for "code_output" type, Gemini only)
+  output?: string;    // Execution output (for "code_output" type)
 }
 
 /**
@@ -67,7 +67,7 @@ export type StreamEventType =
   | "code"           // Code streaming (OpenAI only)
   | "code_executing" // Code is being executed
   | "code_complete"  // Code execution complete
-  | "code_output"    // Execution output/stdout (Gemini only)
+  | "code_output"    // Execution output/stdout (Anthropic + Gemini)
   | "tool_end";      // Code execution tool ended
 
 /**

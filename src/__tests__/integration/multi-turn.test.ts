@@ -68,6 +68,22 @@ describe.skipIf(!HAS_OPENAI)("Multi-turn file access — OpenAI", () => {
   });
 });
 
+describe.skipIf(!HAS_ANTHROPIC)("Conversation.send() — Anthropic code_output events", () => {
+  it("should emit code_output via the multi-turn path", async () => {
+    const conv = new Conversation({ provider: "anthropic" });
+    const events: StreamEvent[] = [];
+
+    await conv.send(
+      "Write and run a Python script that prints 'CONV_OUTPUT_99'. Nothing else.",
+      (event) => events.push(event)
+    );
+
+    const outputEvents = events.filter(e => e.type === "code_output");
+    expect(outputEvents.length).toBeGreaterThan(0);
+    expect(outputEvents.some(e => e.output?.includes("CONV_OUTPUT_99"))).toBe(true);
+  });
+});
+
 describe("Multi-turn file access — Gemini", () => {
   it.skip("Gemini sandbox is ephemeral (no cross-turn file persistence)", () => {});
 });

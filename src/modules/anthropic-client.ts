@@ -406,21 +406,23 @@ export async function executeCodeWithClaudeStreaming(
     containerId = (finalMessage as any).container.id;
   }
 
-  // Extract generated files from final message
+  // Extract generated files and execution output from final message
   for (const block of finalMessage.content) {
     const blockType = (block as any).type;
     if (blockType === "bash_code_execution_tool_result") {
       const result = (block as any).content;
 
-      // Files are in result.content array with type "bash_code_execution_output"
       if (result?.type === "bash_code_execution_result" && Array.isArray(result.content)) {
         for (const item of result.content) {
-          // Handle bash_code_execution_output type (generated files)
           if (item.type === "bash_code_execution_output" && item.file_id) {
+            // Generated file
             files.push({
               file_id: item.file_id,
               filename: item.filename || `file_${item.file_id.slice(-8)}.png`,
             });
+          } else if (item.type === "text" && item.text) {
+            // stdout/stderr from code execution
+            onEvent({ type: "code_output", output: item.text });
           }
         }
       }
@@ -713,6 +715,9 @@ export async function executeCodeWithClaudeMultiTurn(
               file_id: item.file_id,
               filename: item.filename || `file_${item.file_id.slice(-8)}.png`,
             });
+          } else if (item.type === "text" && item.text) {
+            // stdout/stderr from code execution
+            onEvent({ type: "code_output", output: item.text });
           }
         }
       }

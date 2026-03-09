@@ -39,6 +39,25 @@ describe.skipIf(!HAS_KEY)("Anthropic streaming code execution", () => {
     expect(codeEvents.length).toBeGreaterThan(1);
   });
 
+  it("should emit code_output events with execution results", async () => {
+    const client = createAnthropicClient();
+    const events: StreamEvent[] = [];
+    const handler = (event: StreamEvent) => { events.push(event); };
+
+    // Simple prompt that produces deterministic stdout
+    await executeCodeWithClaudeStreaming(
+      client,
+      "Write a Python script that prints 'HELLO_WORLD_42' and run it. Nothing else.",
+      handler
+    );
+
+    // Before the fix, no code_output events were emitted for Anthropic.
+    // Now bash_code_execution_tool_result text items are emitted as code_output.
+    const outputEvents = events.filter(e => e.type === "code_output");
+    expect(outputEvents.length).toBeGreaterThan(0);
+    expect(outputEvents.some(e => e.output?.includes("HELLO_WORLD_42"))).toBe(true);
+  });
+
   it("should download generated files", async () => {
     const client = createAnthropicClient();
     const handler = () => {};
