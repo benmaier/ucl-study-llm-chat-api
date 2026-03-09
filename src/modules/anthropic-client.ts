@@ -412,17 +412,22 @@ export async function executeCodeWithClaudeStreaming(
     if (blockType === "bash_code_execution_tool_result") {
       const result = (block as any).content;
 
-      if (result?.type === "bash_code_execution_result" && Array.isArray(result.content)) {
-        for (const item of result.content) {
-          if (item.type === "bash_code_execution_output" && item.file_id) {
-            // Generated file
-            files.push({
-              file_id: item.file_id,
-              filename: item.filename || `file_${item.file_id.slice(-8)}.png`,
-            });
-          } else if (item.type === "text" && item.text) {
-            // stdout/stderr from code execution
-            onEvent({ type: "code_output", output: item.text });
+      if (result?.type === "bash_code_execution_result") {
+        // stdout/stderr are top-level fields on the result
+        const output = [result.stdout, result.stderr].filter(Boolean).join("");
+        if (output) {
+          onEvent({ type: "code_output", output });
+        }
+
+        // Generated files are in result.content[]
+        if (Array.isArray(result.content)) {
+          for (const item of result.content) {
+            if (item.type === "bash_code_execution_output" && item.file_id) {
+              files.push({
+                file_id: item.file_id,
+                filename: item.filename || `file_${item.file_id.slice(-8)}.png`,
+              });
+            }
           }
         }
       }
@@ -708,16 +713,22 @@ export async function executeCodeWithClaudeMultiTurn(
   for (const block of finalMessage.content) {
     if ((block as any).type === "bash_code_execution_tool_result") {
       const result = (block as any).content;
-      if (result?.type === "bash_code_execution_result" && Array.isArray(result.content)) {
-        for (const item of result.content) {
-          if (item.type === "bash_code_execution_output" && item.file_id) {
-            files.push({
-              file_id: item.file_id,
-              filename: item.filename || `file_${item.file_id.slice(-8)}.png`,
-            });
-          } else if (item.type === "text" && item.text) {
-            // stdout/stderr from code execution
-            onEvent({ type: "code_output", output: item.text });
+      if (result?.type === "bash_code_execution_result") {
+        // stdout/stderr are top-level fields on the result
+        const output = [result.stdout, result.stderr].filter(Boolean).join("");
+        if (output) {
+          onEvent({ type: "code_output", output });
+        }
+
+        // Generated files are in result.content[]
+        if (Array.isArray(result.content)) {
+          for (const item of result.content) {
+            if (item.type === "bash_code_execution_output" && item.file_id) {
+              files.push({
+                file_id: item.file_id,
+                filename: item.filename || `file_${item.file_id.slice(-8)}.png`,
+              });
+            }
           }
         }
       }
