@@ -56,6 +56,9 @@ export {
 // Export Conversation class
 export { Conversation } from "./modules/conversation.js";
 
+// Export unified message format
+export * from "./modules/message-format.js";
+
 // Export conversation persistence
 export * from "./modules/conversation-store.js";
 export { ConversationWriter } from "./modules/conversation-writer.js";

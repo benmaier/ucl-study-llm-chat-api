@@ -110,6 +110,10 @@ import {
   downloadFileToBuffer as downloadOpenAIFileToBuffer,
 } from "./openai-client.js";
 import {
+  convertTurnsToMessages,
+  type UnifiedMessage,
+} from "./message-format.js";
+import {
   createGeminiClient,
   executeCodeWithGeminiMultiTurn,
   uploadFile as uploadGeminiFile,
@@ -817,6 +821,17 @@ export class Conversation {
    */
   getTurns(): TurnRecord[] {
     return [...this.turns];
+  }
+
+  /**
+   * All turns converted to unified message format with interleaved
+   * text, tool calls, and file parts in their original order.
+   *
+   * Uses provider state (when available) to reconstruct the exact
+   * interleaving of text and tool calls from the original response.
+   */
+  getMessages(): UnifiedMessage[] {
+    return convertTurnsToMessages(this.turns);
   }
 
   /**
