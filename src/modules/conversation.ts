@@ -831,7 +831,7 @@ export class Conversation {
    * interleaving of text and tool calls from the original response.
    */
   getMessages(): UnifiedMessage[] {
-    return convertTurnsToMessages(this.turns);
+    return convertTurnsToMessages(this.turns, this.uploads);
   }
 
   /**

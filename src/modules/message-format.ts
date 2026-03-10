@@ -8,7 +8,11 @@
  * deduplication are the consumer's responsibility.
  */
 
-import type { TurnRecord, StoredFile } from "./conversation-store.js";
+import type {
+  TurnRecord,
+  StoredFile,
+  UploadRecord,
+} from "./conversation-store.js";
 
 // ---------------------------------------------------------------------------
 // Unified message types
@@ -263,16 +267,68 @@ function buildAssistantParts(turn: TurnRecord): UnifiedMessagePart[] {
 // Public API
 // ---------------------------------------------------------------------------
 
+/** Regex to strip the "[Attached files:...]" prefix injected at send time. */
+const ATTACHED_FILES_PREFIX = /^\[Attached files:\n[\s\S]*?\]\n\n/;
+
+/**
+ * Build user message parts: strip file-list prefix, add file parts
+ * for any attachments referenced in this turn.
+ */
+function buildUserParts(
+  turn: TurnRecord,
+  uploadsMap: Map<string, UploadRecord>,
+): UnifiedMessagePart[] {
+  const parts: UnifiedMessagePart[] = [];
+
+  // Add file parts for attached uploads
+  if (turn.attachedFileIds?.length) {
+    for (const fileId of turn.attachedFileIds) {
+      const upload = uploadsMap.get(fileId);
+      if (upload) {
+        parts.push({
+          type: "file",
+          fileId: upload.fileId,
+          filename: upload.filename,
+          mimeType: upload.mimeType ?? null,
+          base64Data: upload.base64Data ?? null,
+        });
+      }
+    }
+  }
+
+  // Strip the "[Attached files:...]" prefix — it's context for the LLM,
+  // not meant for display
+  const text = turn.userMessage.replace(ATTACHED_FILES_PREFIX, "");
+  if (text) {
+    parts.push({ type: "text", text });
+  }
+
+  return parts;
+}
+
 /**
  * Convert a single TurnRecord into a [user, assistant] message pair.
+ *
+ * @param turn - The turn to convert.
+ * @param uploads - Upload records for resolving attachedFileIds to metadata.
  */
-export function convertTurnToMessages(turn: TurnRecord): UnifiedMessage[] {
-  const userParts: UnifiedMessagePart[] = [
-    { type: "text", text: turn.userMessage },
-  ];
+export function convertTurnToMessages(
+  turn: TurnRecord,
+  uploads?: UploadRecord[],
+): UnifiedMessage[] {
+  const uploadsMap = new Map<string, UploadRecord>();
+  if (uploads) {
+    for (const u of uploads) {
+      uploadsMap.set(u.fileId, u);
+    }
+  }
 
   return [
-    { role: "user", id: `user-${turn.turnNumber}`, parts: userParts },
+    {
+      role: "user",
+      id: `user-${turn.turnNumber}`,
+      parts: buildUserParts(turn, uploadsMap),
+    },
     {
       role: "assistant",
       id: `assistant-${turn.turnNumber}`,
@@ -283,13 +339,17 @@ export function convertTurnToMessages(turn: TurnRecord): UnifiedMessage[] {
 
 /**
  * Convert all turns into a flat array of unified messages.
+ *
+ * @param turns - All turns from the conversation.
+ * @param uploads - Upload records for resolving attachedFileIds to metadata.
  */
 export function convertTurnsToMessages(
   turns: TurnRecord[],
+  uploads?: UploadRecord[],
 ): UnifiedMessage[] {
   const messages: UnifiedMessage[] = [];
   for (const turn of turns) {
-    messages.push(...convertTurnToMessages(turn));
+    messages.push(...convertTurnToMessages(turn, uploads));
   }
   return messages;
 }
