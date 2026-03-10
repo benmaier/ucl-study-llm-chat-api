@@ -146,8 +146,49 @@ function buildPartsFromGemini(turn: TurnRecord): UnifiedMessagePart[] {
 }
 
 /**
+ * Extract tool output from a Claude tool result block.
+ *
+ * Handles both `bash_code_execution_tool_result` and
+ * `text_editor_code_execution_tool_result` content blocks.
+ */
+function extractClaudeToolOutput(block: Record<string, unknown>): string | null {
+  const content = block.content as Record<string, unknown> | undefined;
+  if (!content) return null;
+
+  const contentType = content.type as string | undefined;
+
+  // bash_code_execution_result → stdout
+  if (contentType === "bash_code_execution_result") {
+    const stdout = content.stdout as string | undefined;
+    const stderr = content.stderr as string | undefined;
+    const parts: string[] = [];
+    if (stdout) parts.push(stdout);
+    if (stderr) parts.push(`[stderr] ${stderr}`);
+    return parts.length > 0 ? parts.join("\n") : null;
+  }
+
+  // text_editor_code_execution_create_result → file created successfully
+  if (contentType === "text_editor_code_execution_create_result") {
+    return "File created successfully.";
+  }
+
+  // text_editor_code_execution_tool_result_error → error message
+  if (contentType === "text_editor_code_execution_tool_result_error") {
+    const msg = content.error_message as string | undefined;
+    return msg ? `Error: ${msg}` : "Error (unknown)";
+  }
+
+  return null;
+}
+
+/**
  * Build interleaved parts from Claude provider state.
  * Walks the last assistant message's content blocks in order.
+ *
+ * Claude server-side tool use produces these block types:
+ * - `server_tool_use` / `tool_use` → tool invocation (code input)
+ * - `bash_code_execution_tool_result` → bash execution output (stdout/stderr)
+ * - `text_editor_code_execution_tool_result` → file editor result
  */
 function buildPartsFromClaude(turn: TurnRecord): UnifiedMessagePart[] {
   const msgs = turn.providerStateAfter?.claudeMessages;
@@ -163,6 +204,9 @@ function buildPartsFromClaude(turn: TurnRecord): UnifiedMessagePart[] {
   let textAccum = "";
   let toolIdx = 0;
 
+  // Map tool_use_id → index in parts[] so result blocks can back-fill output
+  const toolIdToIndex = new Map<string, number>();
+
   function flushText() {
     if (textAccum.trim()) {
       parts.push({ type: "text", text: textAccum });
@@ -173,13 +217,15 @@ function buildPartsFromClaude(turn: TurnRecord): UnifiedMessagePart[] {
   for (const block of lastAssistant.content) {
     if (block.type === "text" && block.text) {
       textAccum += block.text;
-    } else if (block.type === "tool_use") {
+    } else if (block.type === "tool_use" || block.type === "server_tool_use") {
       flushText();
       const code =
-        typeof block.input?.code === "string"
-          ? block.input.code
-          : JSON.stringify(block.input ?? {});
-      // Claude stores tool results in the next user message, not inline
+        typeof block.input?.command === "string"
+          ? block.input.command
+          : typeof block.input?.code === "string"
+            ? block.input.code
+            : JSON.stringify(block.input ?? {});
+      const partIndex = parts.length;
       parts.push({
         type: "tool-call",
         toolCallId: `tool-${turn.turnNumber}-${toolIdx}`,
@@ -187,7 +233,23 @@ function buildPartsFromClaude(turn: TurnRecord): UnifiedMessagePart[] {
         input: { code },
         output: null,
       });
+      if (block.id) {
+        toolIdToIndex.set(block.id as string, partIndex);
+      }
       toolIdx++;
+    } else if (
+      block.type === "bash_code_execution_tool_result" ||
+      block.type === "text_editor_code_execution_tool_result"
+    ) {
+      // Back-fill the output on the matching tool-call part
+      const toolUseId = block.tool_use_id as string | undefined;
+      if (toolUseId && toolIdToIndex.has(toolUseId)) {
+        const idx = toolIdToIndex.get(toolUseId)!;
+        const toolPart = parts[idx] as UnifiedToolCallPart;
+        toolPart.output = extractClaudeToolOutput(
+          block as Record<string, unknown>,
+        );
+      }
     }
   }
 

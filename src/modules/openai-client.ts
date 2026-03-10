@@ -301,9 +301,19 @@ export async function executeCodeWithOpenAIStreaming(
         onEvent({ type: "code_complete", code: currentCode });
         break;
 
-      case "response.code_interpreter_call.completed":
+      case "response.code_interpreter_call.completed": {
+        // Extract execution logs/output from results
+        const results = event.item?.results || event.results || [];
+        const logs: string[] = [];
+        for (const r of results) {
+          if (r.type === "logs" && r.logs) logs.push(r.logs);
+        }
+        if (logs.length) {
+          onEvent({ type: "code_output", output: logs.join("\n") });
+        }
         onEvent({ type: "tool_end", toolName: "code_interpreter" });
         break;
+      }
 
       case "response.output_text.annotation.added":
         // File annotations come through here during streaming
@@ -602,9 +612,18 @@ export async function executeCodeWithOpenAIMultiTurn(
         if (event.code) currentCode = event.code;
         onEvent({ type: "code_complete", code: currentCode });
         break;
-      case "response.code_interpreter_call.completed":
+      case "response.code_interpreter_call.completed": {
+        const results = event.item?.results || event.results || [];
+        const logs: string[] = [];
+        for (const r of results) {
+          if (r.type === "logs" && r.logs) logs.push(r.logs);
+        }
+        if (logs.length) {
+          onEvent({ type: "code_output", output: logs.join("\n") });
+        }
         onEvent({ type: "tool_end", toolName: "code_interpreter" });
         break;
+      }
       case "response.output_text.annotation.added":
         const annotation = event.annotation;
         if (annotation?.type === "container_file_citation") {

@@ -336,6 +336,19 @@ export async function executeCodeWithClaudeStreaming(
         currentToolInput = "";
         lastExtractedCodeLength = 0;
         onEvent({ type: "tool_start", toolName: block.name });
+      } else if (block?.type === "bash_code_execution_tool_result") {
+        const result = block.content;
+        if (result?.type === "bash_code_execution_result") {
+          const output = [result.stdout, result.stderr].filter(Boolean).join("");
+          if (output) onEvent({ type: "code_output", output });
+        }
+      } else if (block?.type === "text_editor_code_execution_tool_result") {
+        const result = block.content;
+        if (result?.type === "text_editor_code_execution_create_result") {
+          onEvent({ type: "code_output", output: "File created successfully." });
+        } else if (result?.type === "text_editor_code_execution_tool_result_error") {
+          onEvent({ type: "code_output", output: `Error: ${result.error_message || "unknown"}` });
+        }
       }
     } else if (event.type === "content_block_delta") {
       const delta = (event as any).delta;
@@ -657,6 +670,19 @@ export async function executeCodeWithClaudeMultiTurn(
         currentToolInput = "";
         lastExtractedCodeLength = 0;
         onEvent({ type: "tool_start", toolName: block.name });
+      } else if (block?.type === "bash_code_execution_tool_result") {
+        const result = block.content;
+        if (result?.type === "bash_code_execution_result") {
+          const output = [result.stdout, result.stderr].filter(Boolean).join("");
+          if (output) onEvent({ type: "code_output", output });
+        }
+      } else if (block?.type === "text_editor_code_execution_tool_result") {
+        const result = block.content;
+        if (result?.type === "text_editor_code_execution_create_result") {
+          onEvent({ type: "code_output", output: "File created successfully." });
+        } else if (result?.type === "text_editor_code_execution_tool_result_error") {
+          onEvent({ type: "code_output", output: `Error: ${result.error_message || "unknown"}` });
+        }
       }
     } else if (event.type === "content_block_delta") {
       const delta = (event as any).delta;
