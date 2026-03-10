@@ -1,8 +1,20 @@
 {
-  "name": "test-native-apis",
+  "name": "ucl-study-llm-chat-api",
   "version": "1.0.0",
-  "description": "Test native APIs for Claude and OpenAI with code execution",
+  "description": "Unified LLM chat API for Claude, OpenAI, and Gemini with code execution",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
