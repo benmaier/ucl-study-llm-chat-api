@@ -52,6 +52,8 @@ export interface ProviderState {
   openaiResponseId?: string;
   /** OpenAI: container ID (for file downloads) */
   openaiContainerId?: string;
+  /** OpenAI: full response output array (interleaved tool calls + messages) */
+  openaiOutput?: any[];
 
   /** Gemini: raw `contents[]` array (role + parts) */
   geminiContents?: any[];

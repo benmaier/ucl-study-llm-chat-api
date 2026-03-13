@@ -8,7 +8,11 @@
  */
 
 import OpenAI from "openai";
-import { writeFileSync } from "fs";
+import { writeFileSync, appendFileSync } from "fs";
+
+/** Enable verbose per-event logging with DEBUG_STREAMS=1 */
+const DEBUG_STREAMS = !!process.env.DEBUG_STREAMS;
+
 import {
   UploadedFile,
   CodeExecutionFile,
@@ -115,7 +119,7 @@ export async function executeCodeWithOpenAI(
   prompt: string,
   options?: CodeExecutionOptions
 ): Promise<CodeExecutionResult> {
-  const model = options?.model ?? "gpt-4o";
+  const model = options?.model ?? "gpt-5";
 
   // Build container configuration
   // For file uploads, use "auto" mode with file_ids - files must be uploaded via client.files.create()
@@ -136,6 +140,7 @@ export async function executeCodeWithOpenAI(
         container: containerConfig,
       },
     ],
+    include: ["code_interpreter_call.outputs"] as any,
   });
 
   // Extract text, files, and code artifacts from response
@@ -163,8 +168,8 @@ export async function executeCodeWithOpenAI(
         containerId = item.container_id;
       }
 
-      // Extract files from code_interpreter_call results/output
-      const results = item.results || item.output || [];
+      // Extract files from code_interpreter_call results/outputs
+      const results = item.results || item.outputs || [];
       for (const result of results) {
         if (result.files) {
           for (const file of result.files) {
@@ -224,7 +229,7 @@ export async function executeCodeWithOpenAIStreaming(
   onEvent: (event: StreamEvent) => void,
   options?: CodeExecutionOptions
 ): Promise<CodeExecutionResult> {
-  const model = options?.model ?? "gpt-4o";
+  const model = options?.model ?? "gpt-5";
 
   // Build container configuration
   // For file uploads, use "auto" mode with file_ids
@@ -244,6 +249,7 @@ export async function executeCodeWithOpenAIStreaming(
         container: containerConfig,
       },
     ],
+    include: ["code_interpreter_call.outputs"] as any,
     stream: true,
   });
 
@@ -253,70 +259,57 @@ export async function executeCodeWithOpenAIStreaming(
   const codeArtifacts: CodeArtifact[] = [];
   let containerId: string | undefined;
   let fullResponse: any = null;
-  let currentCodeInterpreterId: string | undefined;
+  /** Track tool item IDs whose code_output was already emitted during streaming */
+  const toolOutputEmittedIds = new Set<string>();
 
+  // Stream text and tool events in real-time.
   for await (const event of stream as AsyncIterable<any>) {
-    const eventType = event.type;
-
-    switch (eventType) {
-      case "response.created":
-        // Response created, nothing to capture for unified interface
-        break;
-
+    switch (event.type) {
       case "response.output_item.added":
-        // Track when a code interpreter call starts
         if (event.item?.type === "code_interpreter_call") {
-          currentCodeInterpreterId = event.item.id;
           currentCode = "";
           onEvent({ type: "tool_start", toolName: "code_interpreter" });
         }
         break;
-
       case "response.output_text.delta":
-        // Text is in event.delta, not event.text
         if (event.delta) {
           fullText += event.delta;
           onEvent({ type: "text", text: event.delta });
         }
         break;
-
       case "response.code_interpreter_call.in_progress":
         onEvent({ type: "code_executing" });
         break;
-
-      case "response.code_interpreter_call_code.delta":
-        // Code is in event.delta, not event.code
+      case "response.code_interpreter_call_code.delta": {
         const codeDelta = event.delta || event.code || "";
         if (codeDelta) {
           currentCode += codeDelta;
           onEvent({ type: "code", code: codeDelta });
         }
         break;
-
+      }
       case "response.code_interpreter_call_code.done":
-        // Full code is available in event.code
-        if (event.code) {
-          currentCode = event.code;
-        }
+        if (event.code) currentCode = event.code;
         onEvent({ type: "code_complete", code: currentCode });
         break;
-
       case "response.code_interpreter_call.completed": {
-        // Extract execution logs/output from results
-        const results = event.item?.results || event.results || [];
-        const logs: string[] = [];
-        for (const r of results) {
-          if (r.type === "logs" && r.logs) logs.push(r.logs);
+        // Try to extract output from the completed event itself.
+        // If `include: ["code_interpreter_call.outputs"]` populates the
+        // event item, we can emit code_output BEFORE tool_end — matching
+        // Claude/Gemini event ordering and avoiding the deferred-output path.
+        const completedResults = (event as any).item?.results || (event as any).item?.outputs || [];
+        const completedLogs: string[] = [];
+        for (const r of completedResults) {
+          if (r.type === "logs" && r.logs) completedLogs.push(r.logs);
         }
-        if (logs.length) {
-          onEvent({ type: "code_output", output: logs.join("\n") });
+        if (completedLogs.length) {
+          onEvent({ type: "code_output", output: completedLogs.join("\n") });
+          toolOutputEmittedIds.add((event as any).item?.id);
         }
         onEvent({ type: "tool_end", toolName: "code_interpreter" });
         break;
       }
-
-      case "response.output_text.annotation.added":
-        // File annotations come through here during streaming
+      case "response.output_text.annotation.added": {
         const annotation = event.annotation;
         if (annotation?.type === "container_file_citation") {
           files.push({
@@ -324,25 +317,24 @@ export async function executeCodeWithOpenAIStreaming(
             container_id: annotation.container_id,
             filename: annotation.filename,
           });
-          // Capture container ID
-          if (annotation.container_id) {
-            containerId = annotation.container_id;
-          }
+          if (annotation.container_id) containerId = annotation.container_id;
         }
         break;
-
+      }
       case "response.completed":
         fullResponse = event.response;
         break;
     }
   }
 
-  // Extract code artifacts, files, and text from final response
+  // Extract artifacts/files and emit code_output from fullResponse.
+  // Always emit one code_output per tool so the stream-mapper's
+  // deferred-output queue stays in sync.  Skip tools whose output
+  // was already emitted during the streaming phase.
   if (fullResponse?.output) {
     let responseText = "";
     for (const item of fullResponse.output) {
       if (item.type === "code_interpreter_call") {
-        // Extract code artifact
         if (item.code) {
           codeArtifacts.push({
             id: item.id,
@@ -351,14 +343,12 @@ export async function executeCodeWithOpenAIStreaming(
             language: "python",
           });
         }
-        // Get container ID if not already set
-        if (item.container_id && !containerId) {
-          containerId = item.container_id;
-        }
+        if (item.container_id && !containerId) containerId = item.container_id;
 
-        // Extract files from code_interpreter_call results/output
-        const results = item.results || item.output || [];
+        const results = item.results || item.outputs || [];
+        const logs: string[] = [];
         for (const result of results) {
+          if (result.type === "logs" && result.logs) logs.push(result.logs);
           if (result.files) {
             for (const file of result.files) {
               const exists = files.some((f) => f.file_id === file.file_id);
@@ -373,37 +363,22 @@ export async function executeCodeWithOpenAIStreaming(
             }
           }
         }
+        // Emit code_output for every tool (even empty) so deferred queue
+        // stays aligned.  Skip if already emitted during streaming.
+        if (!toolOutputEmittedIds.has(item.id)) {
+          onEvent({ type: "code_output", output: logs.length ? logs.join("\n") : "" });
+        }
       } else if (item.type === "message") {
         for (const content of item.content || []) {
-          if (content.type === "output_text") {
-            responseText += content.text;
-          }
-          if (content.annotations) {
-            for (const annotation of content.annotations) {
-              if (annotation.type === "container_file_citation") {
-                // Only add if not already in files array
-                const exists = files.some((f) => f.file_id === annotation.file_id);
-                if (!exists) {
-                  files.push({
-                    file_id: annotation.file_id,
-                    container_id: annotation.container_id,
-                    filename: annotation.filename,
-                  });
-                }
-              }
-            }
-          }
+          if (content.type === "output_text") responseText += content.text;
         }
       }
     }
-
-    // Use full response text if streaming missed post-tool-call text
     if (responseText && responseText.length > fullText.length) {
       fullText = responseText;
     }
   }
 
-  // Fallback: use output_text convenience property
   if (fullResponse?.output_text && fullResponse.output_text.length > fullText.length) {
     fullText = fullResponse.output_text;
   }
@@ -413,6 +388,7 @@ export async function executeCodeWithOpenAIStreaming(
     files,
     codeArtifacts,
     containerId,
+    openaiOutput: fullResponse?.output,
   };
 }
 
@@ -495,7 +471,7 @@ export async function chatWithOpenAI(
   messages.push({ role: "user", content: message });
 
   const response = await client.chat.completions.create({
-    model: options?.model ?? "gpt-4o",
+    model: options?.model ?? "gpt-5",
     messages,
   });
 
@@ -519,7 +495,7 @@ export async function streamChatWithOpenAI(
   messages.push({ role: "user", content: message });
 
   const stream = await client.chat.completions.create({
-    model: options?.model ?? "gpt-4o",
+    model: options?.model ?? "gpt-5",
     messages,
     stream: true,
   });
@@ -537,6 +513,49 @@ export async function streamChatWithOpenAI(
   return fullText;
 }
 
+/** Append a JSONL trace entry if traceFile is set. */
+function trace(traceFile: string | undefined, layer: string, type: string, data: Record<string, unknown>) {
+  if (!traceFile) return;
+  try {
+    appendFileSync(traceFile, JSON.stringify({ ts: new Date().toISOString(), layer, type, data }) + "\n");
+  } catch { /* best-effort */ }
+}
+
+/** Summarize an OpenAI streaming event for trace logging (truncate large fields). */
+function summarizeOpenAIEvent(event: any): Record<string, unknown> {
+  const summary: Record<string, unknown> = { type: event.type };
+  if (event.item?.type) summary.itemType = event.item.type;
+  if (event.item?.id) summary.itemId = event.item.id;
+  if (event.item?.status) summary.itemStatus = event.item.status;
+  if (event.delta !== undefined) {
+    summary.delta = typeof event.delta === "string" && event.delta.length > 100
+      ? event.delta.slice(0, 100) + "..."
+      : event.delta;
+  }
+  if (event.code !== undefined) {
+    summary.code = typeof event.code === "string" && event.code.length > 100
+      ? event.code.slice(0, 100) + "..."
+      : event.code;
+  }
+  // For completed events, log results/outputs summary
+  if (event.item?.results) {
+    summary.resultsCount = event.item.results.length;
+    summary.resultTypes = event.item.results.map((r: any) => r.type);
+  }
+  if (event.item?.outputs) {
+    summary.outputsCount = event.item.outputs.length;
+    summary.outputTypes = event.item.outputs.map((r: any) => r.type);
+  }
+  // For response.completed, log output summary
+  if (event.response?.output) {
+    summary.responseOutputCount = event.response.output.length;
+    summary.responseOutputTypes = event.response.output.map((i: any) => i.type);
+  }
+  if (event.response?.status) summary.responseStatus = event.response.status;
+  if (event.response?.incomplete_details) summary.incompleteDetails = event.response.incomplete_details;
+  return summary;
+}
+
 /**
  * Multi-turn code execution with OpenAI.
  *
@@ -550,7 +569,7 @@ export async function executeCodeWithOpenAIMultiTurn(
   previousResponseId?: string,
   options?: CodeExecutionOptions
 ): Promise<MultiTurnCodeResult> {
-  const model = options?.model ?? "gpt-4o";
+  const model = options?.model ?? "gpt-5";
 
   const containerConfig: any = { type: "auto" };
   if (options?.fileIds?.length) {
@@ -566,6 +585,7 @@ export async function executeCodeWithOpenAIMultiTurn(
         container: containerConfig,
       },
     ],
+    include: ["code_interpreter_call.outputs"],
     stream: true,
   };
 
@@ -581,13 +601,15 @@ export async function executeCodeWithOpenAIMultiTurn(
   const codeArtifacts: CodeArtifact[] = [];
   let containerId: string | undefined;
   let fullResponse: any = null;
-  let currentCodeInterpreterId: string | undefined;
+  /** Track tool item IDs whose code_output was already emitted during streaming */
+  const toolOutputEmittedIds = new Set<string>();
 
+  // Stream text and tool events in real-time.
   for await (const event of stream) {
+    trace(options?.traceFile, "openai", event.type, summarizeOpenAIEvent(event));
     switch (event.type) {
       case "response.output_item.added":
         if (event.item?.type === "code_interpreter_call") {
-          currentCodeInterpreterId = event.item.id;
           currentCode = "";
           onEvent({ type: "tool_start", toolName: "code_interpreter" });
         }
@@ -601,30 +623,36 @@ export async function executeCodeWithOpenAIMultiTurn(
       case "response.code_interpreter_call.in_progress":
         onEvent({ type: "code_executing" });
         break;
-      case "response.code_interpreter_call_code.delta":
+      case "response.code_interpreter_call_code.delta": {
         const codeDelta = event.delta || event.code || "";
         if (codeDelta) {
           currentCode += codeDelta;
           onEvent({ type: "code", code: codeDelta });
         }
         break;
+      }
       case "response.code_interpreter_call_code.done":
         if (event.code) currentCode = event.code;
         onEvent({ type: "code_complete", code: currentCode });
         break;
       case "response.code_interpreter_call.completed": {
-        const results = event.item?.results || event.results || [];
-        const logs: string[] = [];
-        for (const r of results) {
-          if (r.type === "logs" && r.logs) logs.push(r.logs);
+        // Try to extract output from the completed event itself.
+        // If `include: ["code_interpreter_call.outputs"]` populates the
+        // event item, we can emit code_output BEFORE tool_end — matching
+        // Claude/Gemini event ordering and avoiding the deferred-output path.
+        const completedResults = (event as any).item?.results || (event as any).item?.outputs || [];
+        const completedLogs: string[] = [];
+        for (const r of completedResults) {
+          if (r.type === "logs" && r.logs) completedLogs.push(r.logs);
         }
-        if (logs.length) {
-          onEvent({ type: "code_output", output: logs.join("\n") });
+        if (completedLogs.length) {
+          onEvent({ type: "code_output", output: completedLogs.join("\n") });
+          toolOutputEmittedIds.add((event as any).item?.id);
         }
         onEvent({ type: "tool_end", toolName: "code_interpreter" });
         break;
       }
-      case "response.output_text.annotation.added":
+      case "response.output_text.annotation.added": {
         const annotation = event.annotation;
         if (annotation?.type === "container_file_citation") {
           files.push({
@@ -635,13 +663,56 @@ export async function executeCodeWithOpenAIMultiTurn(
           if (annotation.container_id) containerId = annotation.container_id;
         }
         break;
+      }
       case "response.completed":
         fullResponse = event.response;
         break;
     }
   }
 
-  // Extract code artifacts, files, and text from final response
+  // Trace: full response summary
+  if (fullResponse) {
+    trace(options?.traceFile, "openai", "FULL_RESPONSE_SUMMARY", {
+      status: fullResponse.status,
+      incomplete_details: fullResponse.incomplete_details ?? null,
+      outputCount: fullResponse.output?.length ?? 0,
+      outputTypes: fullResponse.output?.map((i: any) => i.type),
+      outputIds: fullResponse.output?.map((i: any) => i.id),
+      outputTextLength: fullResponse.output_text?.length ?? 0,
+    });
+  }
+
+  // Debug: log full response structure (enable with DEBUG_STREAMS=1)
+  if (DEBUG_STREAMS && fullResponse) {
+    console.log("[openai-client] Response status:", fullResponse.status,
+      "| incomplete_details:", JSON.stringify(fullResponse.incomplete_details ?? null),
+      "| output items:", fullResponse.output?.length ?? 0,
+      "| output types:", fullResponse.output?.map((i: any) => i.type).join(", "),
+      "| output_text length:", fullResponse.output_text?.length ?? 0);
+    for (let i = 0; i < (fullResponse.output?.length ?? 0); i++) {
+      const item = fullResponse.output[i];
+      const summary: any = { type: item.type, id: item.id };
+      if (item.type === "message") {
+        summary.content = item.content?.map((c: any) => ({
+          type: c.type,
+          textLength: c.text?.length ?? 0,
+          textPreview: c.text?.slice(0, 100),
+        }));
+      } else if (item.type === "code_interpreter_call") {
+        summary.codeLength = item.code?.length ?? 0;
+        summary.status = item.status;
+        const results = item.results || item.outputs || [];
+        summary.resultsCount = results.length;
+        summary.resultTypes = results.map((r: any) => r.type);
+      }
+      console.log(`[openai-client] output[${i}]:`, JSON.stringify(summary));
+    }
+  }
+
+  // Extract code artifacts, files, and emit code_output from fullResponse.
+  // Always emit one code_output per tool so the stream-mapper's
+  // deferred-output queue stays in sync.  Skip tools whose output
+  // was already emitted during the streaming phase.
   if (fullResponse?.output) {
     let responseText = "";
     for (const item of fullResponse.output) {
@@ -656,9 +727,10 @@ export async function executeCodeWithOpenAIMultiTurn(
         }
         if (item.container_id && !containerId) containerId = item.container_id;
 
-        // Extract files from code_interpreter_call results/output
-        const results = item.results || item.output || [];
+        const results = item.results || item.outputs || [];
+        const logs: string[] = [];
         for (const result of results) {
+          if (result.type === "logs" && result.logs) logs.push(result.logs);
           if (result.files) {
             for (const file of result.files) {
               const exists = files.some((f) => f.file_id === file.file_id);
@@ -673,44 +745,27 @@ export async function executeCodeWithOpenAIMultiTurn(
             }
           }
         }
+        // Emit code_output for every tool (even empty) so deferred queue
+        // stays aligned.  Skip if already emitted during streaming.
+        if (!toolOutputEmittedIds.has(item.id)) {
+          onEvent({ type: "code_output", output: logs.length ? logs.join("\n") : "" });
+        }
       } else if (item.type === "message") {
         for (const content of item.content || []) {
-          if (content.type === "output_text") {
-            responseText += content.text;
-          }
-          if (content.annotations) {
-            for (const annotation of content.annotations) {
-              if (annotation.type === "container_file_citation") {
-                const exists = files.some((f) => f.file_id === annotation.file_id);
-                if (!exists) {
-                  files.push({
-                    file_id: annotation.file_id,
-                    container_id: annotation.container_id,
-                    filename: annotation.filename,
-                  });
-                }
-              }
-            }
-          }
+          if (content.type === "output_text") responseText += content.text;
         }
       }
     }
-
-    // Use full response text if streaming missed post-tool-call text
     if (responseText && responseText.length > fullText.length) {
       fullText = responseText;
     }
   }
 
-  // Fallback: use output_text convenience property
   if (fullResponse?.output_text && fullResponse.output_text.length > fullText.length) {
     fullText = fullResponse.output_text;
   }
 
-  // Build conversation history for the provider-agnostic interface
   const updatedMessages: ConversationMessage[] = [];
-  // We don't reconstruct full history since OpenAI chains via response IDs,
-  // but we expose the messages for the caller's convenience
   updatedMessages.push({ role: "user", content: userMessage });
   updatedMessages.push({ role: "assistant", content: fullText });
 
@@ -721,5 +776,6 @@ export async function executeCodeWithOpenAIMultiTurn(
     containerId,
     messages: updatedMessages,
     responseId: fullResponse?.id,
+    openaiOutput: fullResponse?.output,
   };
 }

@@ -44,6 +44,7 @@ export interface CodeExecutionResult {
   files: CodeExecutionFile[];    // Generated files (images, etc.)
   codeArtifacts: CodeArtifact[]; // Source code files created/executed
   containerId?: string;          // Container ID for follow-up requests
+  openaiOutput?: any[];          // OpenAI: full response output array
 }
 
 /**
@@ -78,6 +79,8 @@ export interface CodeExecutionOptions {
   maxTokens?: number;
   containerId?: string; // For continuing in same container (Claude only)
   fileIds?: string[];   // File IDs to make available for code execution
+  /** When set, append JSONL trace entries to this file path. */
+  traceFile?: string;
 }
 
 /**
@@ -132,6 +135,8 @@ export interface ConversationOptions {
  */
 export interface SendOptions {
   fileIds?: string[];
+  /** When set, append JSONL trace entries to this file path. */
+  traceFile?: string;
 }
 
 /**

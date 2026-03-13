@@ -265,7 +265,54 @@ function buildPartsFromClaude(turn: TurnRecord): UnifiedMessagePart[] {
 }
 
 /**
- * Fallback builder for OpenAI or when provider state is missing.
+ * Build interleaved parts from OpenAI provider state.
+ * Walks `openaiOutput` array which contains items in order:
+ *   code_interpreter_call, message (with text after tool)
+ */
+function buildPartsFromOpenAI(turn: TurnRecord): UnifiedMessagePart[] {
+  const output = turn.providerStateAfter?.openaiOutput;
+  if (!output?.length) return buildPartsFallback(turn);
+
+  const parts: UnifiedMessagePart[] = [];
+  let toolIdx = 0;
+
+  for (const item of output) {
+    if (item.type === "code_interpreter_call") {
+      const code = item.code ?? "";
+      const results = item.results || item.outputs || [];
+      const logs: string[] = [];
+      for (const r of results) {
+        if (r.type === "logs" && r.logs) logs.push(r.logs);
+      }
+      parts.push({
+        type: "tool-call",
+        toolCallId: `tool-${turn.turnNumber}-${toolIdx}`,
+        toolName: "code_interpreter",
+        input: { code },
+        output: logs.length ? logs.join("\n") : null,
+      });
+      toolIdx++;
+    } else if (item.type === "message") {
+      for (const content of item.content || []) {
+        if (content.type === "output_text" && content.text) {
+          parts.push({ type: "text", text: content.text });
+        }
+      }
+    }
+  }
+
+  // Append generated files
+  if (turn.generatedFiles?.length) {
+    for (const file of turn.generatedFiles) {
+      parts.push(storedFileToPart(file));
+    }
+  }
+
+  return parts;
+}
+
+/**
+ * Fallback builder when provider state is missing.
  * Text first, then tools, then files (no interleaving info available).
  */
 function buildPartsFallback(turn: TurnRecord): UnifiedMessagePart[] {
@@ -321,6 +368,9 @@ function buildAssistantParts(turn: TurnRecord): UnifiedMessagePart[] {
   }
   if (ps?.claudeMessages?.length) {
     return buildPartsFromClaude(turn);
+  }
+  if (ps?.openaiOutput?.length) {
+    return buildPartsFromOpenAI(turn);
   }
   return buildPartsFallback(turn);
 }

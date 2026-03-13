@@ -546,6 +546,7 @@ export class Conversation {
         model: this.model,
         maxTokens: this.maxTokens,
         fileIds: options?.fileIds,
+        traceFile: options?.traceFile,
       }
     );
 
@@ -562,6 +563,7 @@ export class Conversation {
     this.recordTurn(startedAt, message, options?.fileIds ?? [], result.text, result.codeArtifacts, result.files, {
       openaiResponseId: this.responseId,
       openaiContainerId: this.containerId,
+      openaiOutput: result.openaiOutput,
     });
 
     return { text: result.text, files: result.files, codeArtifacts: result.codeArtifacts };
