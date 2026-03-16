@@ -9,6 +9,9 @@ node_modules/
 # Build output
 dist/
 
+# Pack artifacts
+*.tgz
+
 # Generated files from tests
 *.png
 file_*.png
