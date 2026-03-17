@@ -16,6 +16,7 @@
     "src"
   ],
   "scripts": {
+    "prepare": "npm run build",
     "build": "tsc",
     "test": "vitest run",
     "test:unit": "vitest run src/__tests__/unit",
