@@ -696,11 +696,17 @@ export class Conversation {
           );
           file.base64Data = buffer.toString("base64");
           if (!file.mimeType && mimeType) file.mimeType = mimeType;
-        } else if (this.provider === "openai" && file.container_id) {
+        } else if (this.provider === "openai") {
+          const containerId = file.container_id || this.containerId;
+          if (!containerId) {
+            console.error(`[conversation] Cannot capture base64 for OpenAI file ${file.file_id}: no container_id`);
+            continue;
+          }
           const { buffer, mimeType } = await downloadOpenAIFileToBuffer(
-            { file_id: file.file_id, container_id: file.container_id }
+            { file_id: file.file_id, container_id: containerId }
           );
           file.base64Data = buffer.toString("base64");
+          if (!file.container_id) file.container_id = containerId;
           if (!file.mimeType && mimeType) file.mimeType = mimeType;
         }
       } catch (err) {
