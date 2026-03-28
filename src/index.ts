@@ -64,8 +64,5 @@ export * from "./modules/conversation-store.js";
 export { ConversationWriter } from "./modules/conversation-writer.js";
 export { FileWriter } from "./modules/file-writer.js";
 
-// Export Langfuse client
-export * from "./modules/langfuse-client.js";
-
 // Export Key Pool
 export * from "./modules/key-pool.js";
