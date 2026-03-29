@@ -131,6 +131,7 @@ export class Conversation {
   private anthropicClient?: Anthropic;
   private openaiClient?: OpenAI;
   private geminiClient?: GoogleGenAI;
+  private apiKey?: string;
 
   // Claude state
   private rawMessages: ConversationMessage[] = [];
@@ -188,6 +189,7 @@ export class Conversation {
     this.metadata = options.metadata;
     this.writers = options.writers ?? [];
     this.persistUploadData = options.persistUploadData ?? true;
+    this.apiKey = options.apiKey;
 
     if (this.provider === "anthropic") {
       this.anthropicClient = createAnthropicClient(options.apiKey);
@@ -432,7 +434,7 @@ export class Conversation {
     } else if (this.provider === "gemini") {
       return downloadGeminiFiles(files, outputDir);
     } else {
-      return downloadOpenAIFiles(files, outputDir);
+      return downloadOpenAIFiles(files, outputDir, this.apiKey);
     }
   }
 
@@ -703,7 +705,8 @@ export class Conversation {
             continue;
           }
           const { buffer, mimeType } = await downloadOpenAIFileToBuffer(
-            { file_id: file.file_id, container_id: containerId }
+            { file_id: file.file_id, container_id: containerId },
+            this.apiKey
           );
           file.base64Data = buffer.toString("base64");
           if (!file.container_id) file.container_id = containerId;
