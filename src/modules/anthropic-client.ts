@@ -623,10 +623,35 @@ export async function executeCodeWithClaudeMultiTurn(
   const model = options?.model ?? "claude-sonnet-4-5-20250929";
   const maxTokens = options?.maxTokens ?? 8192;
 
+  // Enable prompt caching: mark the last cacheable block in the conversation
+  // prefix so Anthropic reuses tokens from previous turns. On a 10-turn
+  // conversation this reduces input token costs by ~90% for the stable prefix.
+  const cachedMessages = rawMessages.length > 1
+    ? rawMessages.map((msg: any, idx: number) => {
+        // Mark the last block of the second-to-last message as the cache breakpoint
+        if (idx !== rawMessages.length - 2) return msg;
+        if (Array.isArray(msg.content)) {
+          const content = [...msg.content];
+          const lastBlock = { ...content[content.length - 1] };
+          lastBlock.cache_control = { type: "ephemeral" };
+          content[content.length - 1] = lastBlock;
+          return { ...msg, content };
+        }
+        // String content → convert to text block array to add cache_control
+        if (typeof msg.content === "string") {
+          return {
+            ...msg,
+            content: [{ type: "text", text: msg.content, cache_control: { type: "ephemeral" } }],
+          };
+        }
+        return msg;
+      })
+    : rawMessages;
+
   const requestParams: any = {
     model,
     max_tokens: maxTokens,
-    messages: rawMessages,
+    messages: cachedMessages,
     tools: [
       {
         type: "code_execution_20250825",
