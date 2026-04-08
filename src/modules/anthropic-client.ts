@@ -605,17 +605,31 @@ export async function executeCodeWithClaudeMultiTurn(
     }
   }
 
-  if (options?.fileIds?.length) {
-    rawMessages.push({
-      role: "user",
-      content: [
-        { type: "text", text: userMessage },
-        ...options.fileIds.map((id) => ({
-          type: "container_upload",
-          file_id: id,
-        })),
-      ],
-    });
+  const hasFiles = options?.fileIds?.length;
+  const hasImages = options?.images?.length;
+
+  if (hasFiles || hasImages) {
+    const contentBlocks: any[] = [{ type: "text", text: userMessage }];
+    // Embed images as visual content (base64 inline)
+    if (hasImages) {
+      for (const img of options!.images!) {
+        contentBlocks.push({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: img.mediaType,
+            data: img.base64Data,
+          },
+        });
+      }
+    }
+    // Reference non-image files for code execution
+    if (hasFiles) {
+      for (const id of options!.fileIds!) {
+        contentBlocks.push({ type: "container_upload", file_id: id });
+      }
+    }
+    rawMessages.push({ role: "user", content: contentBlocks });
   } else {
     rawMessages.push({ role: "user", content: userMessage });
   }
@@ -647,6 +661,15 @@ export async function executeCodeWithClaudeMultiTurn(
         return msg;
       })
     : rawMessages;
+
+  // Debug: log message structure
+  for (let i = 0; i < cachedMessages.length; i++) {
+    const msg = cachedMessages[i];
+    const contentTypes = Array.isArray(msg.content)
+      ? msg.content.map((b: any) => b.type).join(",")
+      : "string";
+    console.log(`[anthropic] msg[${i}] role=${msg.role} contentTypes=${contentTypes}`);
+  }
 
   const requestParams: any = {
     model,
@@ -694,19 +717,21 @@ export async function executeCodeWithClaudeMultiTurn(
         currentToolId = block.id;
         currentToolInput = "";
         lastExtractedCodeLength = 0;
-        onEvent({ type: "tool_start", toolName: block.name });
+        onEvent({ type: "tool_start", toolName: block.name, toolCallId: block.id });
       } else if (block?.type === "bash_code_execution_tool_result") {
         const result = block.content;
+        const linkedToolId = block.tool_use_id;
         if (result?.type === "bash_code_execution_result") {
           const output = [result.stdout, result.stderr].filter(Boolean).join("");
-          if (output) onEvent({ type: "code_output", output });
+          if (output) onEvent({ type: "code_output", output, toolCallId: linkedToolId });
         }
       } else if (block?.type === "text_editor_code_execution_tool_result") {
         const result = block.content;
+        const linkedToolId = block.tool_use_id;
         if (result?.type === "text_editor_code_execution_create_result") {
-          onEvent({ type: "code_output", output: "File created successfully." });
+          onEvent({ type: "code_output", output: "File created successfully.", toolCallId: linkedToolId });
         } else if (result?.type === "text_editor_code_execution_tool_result_error") {
-          onEvent({ type: "code_output", output: `Error: ${result.error_message || "unknown"}` });
+          onEvent({ type: "code_output", output: `Error: ${result.error_message || "unknown"}`, toolCallId: linkedToolId });
         }
       }
     } else if (event.type === "content_block_delta") {

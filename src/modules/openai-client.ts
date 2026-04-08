@@ -576,9 +576,27 @@ export async function executeCodeWithOpenAIMultiTurn(
     containerConfig.file_ids = options.fileIds;
   }
 
+  // Build input: text + optional inline images
+  let input: any = userMessage;
+  if (options?.images?.length) {
+    input = [
+      {
+        type: "message",
+        role: "user",
+        content: [
+          { type: "input_text", text: userMessage },
+          ...options.images.map((img) => ({
+            type: "input_image",
+            image_url: `data:${img.mediaType};base64,${img.base64Data}`,
+          })),
+        ],
+      },
+    ];
+  }
+
   const requestParams: any = {
     model,
-    input: userMessage,
+    input,
     tools: [
       {
         type: "code_interpreter",

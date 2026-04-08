@@ -169,6 +169,15 @@ export async function executeCodeWithGeminiMultiTurn(
   const contents: any[] = previousContents ? [...previousContents] : [];
 
   const userParts: any[] = [{ text: userMessage }];
+  // Embed images as inline visual content
+  if (options?.images?.length) {
+    for (const img of options.images) {
+      userParts.push({
+        inlineData: { mimeType: img.mediaType, data: img.base64Data },
+      });
+    }
+  }
+  // Reference non-image files
   if (options?.fileIds?.length) {
     for (const fileId of options.fileIds) {
       userParts.push({

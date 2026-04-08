@@ -52,10 +52,11 @@ export interface CodeExecutionResult {
  */
 export interface StreamEvent {
   type: StreamEventType;
-  text?: string;      // Text content (for "text" type)
-  code?: string;      // Code content (for "code" and "code_complete" types)
-  toolName?: string;  // Tool name (for "tool_start" and "tool_end" types)
-  output?: string;    // Execution output (for "code_output" type)
+  text?: string;        // Text content (for "text" type)
+  code?: string;        // Code content (for "code" and "code_complete" types)
+  toolName?: string;    // Tool name (for "tool_start" and "tool_end" types)
+  output?: string;      // Execution output (for "code_output" type)
+  toolCallId?: string;  // Links code_output to its originating tool (Claude)
 }
 
 /**
@@ -74,11 +75,19 @@ export type StreamEventType =
 /**
  * Options for code execution
  */
+/** Base64-encoded image to embed as visual content in the LLM prompt. */
+export interface ImageBlock {
+  base64Data: string;
+  mediaType: string; // e.g. "image/png", "image/jpeg"
+}
+
 export interface CodeExecutionOptions {
   model?: string;
   maxTokens?: number;
   containerId?: string; // For continuing in same container (Claude only)
   fileIds?: string[];   // File IDs to make available for code execution
+  /** Images to embed as visual content (so the LLM can "see" them). */
+  images?: ImageBlock[];
   /** When set, append JSONL trace entries to this file path. */
   traceFile?: string;
 }
@@ -135,6 +144,8 @@ export interface ConversationOptions {
  */
 export interface SendOptions {
   fileIds?: string[];
+  /** Images to embed as visual content (not uploaded, sent inline). */
+  images?: ImageBlock[];
   /** When set, append JSONL trace entries to this file path. */
   traceFile?: string;
 }

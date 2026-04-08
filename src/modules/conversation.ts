@@ -80,6 +80,7 @@ import type {
   SendOptions,
   UploadedFile,
   CodeExecutionFile,
+  ImageBlock,
 } from "./types.js";
 import type { ConversationWriter } from "./conversation-writer.js";
 import {
@@ -501,6 +502,7 @@ export class Conversation {
         maxTokens: this.maxTokens,
         containerId: this.containerId,
         fileIds: options?.fileIds,
+        images: options?.images,
       }
     );
 
@@ -548,6 +550,7 @@ export class Conversation {
         model: this.model,
         maxTokens: this.maxTokens,
         fileIds: options?.fileIds,
+        images: options?.images,
         traceFile: options?.traceFile,
       }
     );
@@ -587,6 +590,7 @@ export class Conversation {
         model: this.model,
         maxTokens: this.maxTokens,
         fileIds: options?.fileIds,
+        images: options?.images,
       }
     );
 
