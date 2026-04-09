@@ -16,11 +16,11 @@
  *
  * ## Error handling
  *
- * All writer calls are **fire-and-forget**: the Conversation class calls
- * them with `.catch(err => console.error(...))` and does NOT await the
- * result or propagate errors. This means a slow or failing writer never
- * blocks the conversation. If you need guaranteed delivery, implement
- * retry logic inside your writer.
+ * All writer calls are **awaited** by the Conversation class to ensure
+ * persistence completes before the function returns. This is critical for
+ * serverless environments (Vercel) where the function may terminate
+ * immediately after returning the HTTP response. Individual writer errors
+ * are caught and logged but do not fail the conversation.
  *
  * ## Implementing a custom writer
  *

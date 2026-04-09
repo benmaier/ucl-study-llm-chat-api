@@ -356,7 +356,7 @@ export class Conversation {
       record.base64Data = fs.readFileSync(filePath).toString("base64");
     }
     this.uploads.push(record);
-    this.notifyUpload(record);
+    await this.notifyUpload(record);
 
     return result;
   }
@@ -399,7 +399,7 @@ export class Conversation {
       record.base64Data = buffer.toString("base64");
     }
     this.uploads.push(record);
-    this.notifyUpload(record);
+    await this.notifyUpload(record);
 
     return result;
   }
@@ -515,8 +515,8 @@ export class Conversation {
     this.textHistory.push({ role: "user", content: message });
     this.textHistory.push({ role: "assistant", content: result.text });
 
-    // Record turn
-    this.recordTurn(startedAt, message, options?.fileIds ?? [], result.text, result.codeArtifacts, result.files, {
+    // Record turn — awaited so writers complete before function returns
+    await this.recordTurn(startedAt, message, options?.fileIds ?? [], result.text, result.codeArtifacts, result.files, {
       claudeMessages: this.rawMessages as any,
       claudeContainerId: this.containerId,
     }, options?.images);
@@ -564,8 +564,8 @@ export class Conversation {
     this.textHistory.push({ role: "user", content: message });
     this.textHistory.push({ role: "assistant", content: result.text });
 
-    // Record turn
-    this.recordTurn(startedAt, message, options?.fileIds ?? [], result.text, result.codeArtifacts, result.files, {
+    // Record turn — awaited so writers complete before function returns
+    await this.recordTurn(startedAt, message, options?.fileIds ?? [], result.text, result.codeArtifacts, result.files, {
       openaiResponseId: this.responseId,
       openaiContainerId: this.containerId,
       openaiOutput: result.openaiOutput,
@@ -599,8 +599,8 @@ export class Conversation {
     this.textHistory.push({ role: "user", content: message });
     this.textHistory.push({ role: "assistant", content: result.text });
 
-    // Record turn
-    this.recordTurn(startedAt, message, options?.fileIds ?? [], result.text, result.codeArtifacts, result.files, {
+    // Record turn — awaited so writers complete before function returns
+    await this.recordTurn(startedAt, message, options?.fileIds ?? [], result.text, result.codeArtifacts, result.files, {
       geminiContents: this.geminiContents,
     }, options?.images);
 
@@ -612,7 +612,7 @@ export class Conversation {
   // ---------------------------------------------------------------------------
 
   /** Build a TurnRecord from a completed turn, push to this.turns, and notify writers. */
-  private recordTurn(
+  private async recordTurn(
     startedAt: string,
     userMessage: string,
     fileIds: string[],
@@ -621,7 +621,7 @@ export class Conversation {
     files: CodeExecutionFile[],
     providerStateAfter: ProviderState,
     inlineImages?: ImageBlock[]
-  ): void {
+  ): Promise<void> {
     const turn: TurnRecord = {
       turnNumber: this.turns.length + 1,
       startedAt,
@@ -644,27 +644,32 @@ export class Conversation {
     };
     this.turns.push(turn);
     this.updatedAt = turn.completedAt;
-    this.notifyTurn(turn);
+    await this.notifyTurn(turn);
   }
 
-  /** Fire-and-forget: serialize current state and call onTurnComplete on all writers. */
-  private notifyTurn(turn: TurnRecord): void {
+  /** Serialize and notify all writers. Awaited so serverless functions
+   *  don't terminate before the DB write completes. */
+  private async notifyTurn(turn: TurnRecord): Promise<void> {
     if (this.writers.length === 0) return;
     const serialized = this.serialize();
-    for (const writer of this.writers) {
-      writer.onTurnComplete(this.id, turn, serialized).catch(err =>
-        console.error("Writer onTurnComplete error:", err)
-      );
-    }
+    await Promise.all(
+      this.writers.map(w =>
+        w.onTurnComplete(this.id, turn, serialized).catch(err =>
+          console.error("Writer onTurnComplete error:", err)
+        )
+      )
+    );
   }
 
-  /** Fire-and-forget: call onFileUploaded on all writers. */
-  private notifyUpload(upload: UploadRecord): void {
-    for (const writer of this.writers) {
-      writer.onFileUploaded(this.id, upload).catch(err =>
-        console.error("Writer onFileUploaded error:", err)
-      );
-    }
+  /** Notify all writers of a file upload. Awaited for serverless safety. */
+  private async notifyUpload(upload: UploadRecord): Promise<void> {
+    await Promise.all(
+      this.writers.map(w =>
+        w.onFileUploaded(this.id, upload).catch(err =>
+          console.error("Writer onFileUploaded error:", err)
+        )
+      )
+    );
   }
 
   /** Build the full serialized conversation from current state. */
