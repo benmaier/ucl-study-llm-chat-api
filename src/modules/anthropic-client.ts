@@ -608,9 +608,10 @@ export async function executeCodeWithClaudeMultiTurn(
   const hasFiles = options?.fileIds?.length;
   const hasImages = options?.images?.length;
 
+  // Build the user message content — may include images and file references
+  let userContent: any = userMessage;
   if (hasFiles || hasImages) {
     const contentBlocks: any[] = [{ type: "text", text: userMessage }];
-    // Embed images as visual content (base64 inline)
     if (hasImages) {
       for (const img of options!.images!) {
         contentBlocks.push({
@@ -623,16 +624,14 @@ export async function executeCodeWithClaudeMultiTurn(
         });
       }
     }
-    // Reference non-image files for code execution
     if (hasFiles) {
       for (const id of options!.fileIds!) {
         contentBlocks.push({ type: "container_upload", file_id: id });
       }
     }
-    rawMessages.push({ role: "user", content: contentBlocks });
-  } else {
-    rawMessages.push({ role: "user", content: userMessage });
+    userContent = contentBlocks;
   }
+  rawMessages.push({ role: "user", content: userContent });
 
   const model = options?.model ?? "claude-sonnet-4-5-20250929";
   const maxTokens = options?.maxTokens ?? 8192;
@@ -816,7 +815,7 @@ export async function executeCodeWithClaudeMultiTurn(
   const updatedMessages: ConversationMessage[] = previousMessages
     ? [...previousMessages]
     : [];
-  updatedMessages.push({ role: "user", content: userMessage });
+  updatedMessages.push({ role: "user", content: userContent });
   updatedMessages.push({ role: "assistant", content: finalMessage.content as any });
 
   return {

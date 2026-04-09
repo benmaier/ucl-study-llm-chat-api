@@ -519,7 +519,7 @@ export class Conversation {
     this.recordTurn(startedAt, message, options?.fileIds ?? [], result.text, result.codeArtifacts, result.files, {
       claudeMessages: this.rawMessages as any,
       claudeContainerId: this.containerId,
-    });
+    }, options?.images);
 
     return { text: result.text, files: result.files, codeArtifacts: result.codeArtifacts };
   }
@@ -569,7 +569,7 @@ export class Conversation {
       openaiResponseId: this.responseId,
       openaiContainerId: this.containerId,
       openaiOutput: result.openaiOutput,
-    });
+    }, options?.images);
 
     return { text: result.text, files: result.files, codeArtifacts: result.codeArtifacts };
   }
@@ -602,7 +602,7 @@ export class Conversation {
     // Record turn
     this.recordTurn(startedAt, message, options?.fileIds ?? [], result.text, result.codeArtifacts, result.files, {
       geminiContents: this.geminiContents,
-    });
+    }, options?.images);
 
     return { text: result.text, files: result.files, codeArtifacts: result.codeArtifacts };
   }
@@ -619,7 +619,8 @@ export class Conversation {
     assistantText: string,
     codeArtifacts: TurnResult["codeArtifacts"],
     files: CodeExecutionFile[],
-    providerStateAfter: ProviderState
+    providerStateAfter: ProviderState,
+    inlineImages?: ImageBlock[]
   ): void {
     const turn: TurnRecord = {
       turnNumber: this.turns.length + 1,
@@ -627,6 +628,7 @@ export class Conversation {
       completedAt: new Date().toISOString(),
       userMessage,
       attachedFileIds: fileIds,
+      ...(inlineImages?.length ? { inlineImages } : {}),
       assistantText,
       codeArtifacts,
       generatedFiles: files.map(f => ({

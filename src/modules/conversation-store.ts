@@ -133,6 +133,8 @@ export interface TurnRecord {
   userMessage: string;
   /** File IDs that were attached to this turn via `SendOptions.fileIds`. */
   attachedFileIds: string[];
+  /** Images sent inline as visual content (base64 encoded, not uploaded). */
+  inlineImages?: Array<{ base64Data: string; mediaType: string }>;
   /** The assistant's full text response. */
   assistantText: string;
   /** Source code blocks extracted from the assistant's response. */

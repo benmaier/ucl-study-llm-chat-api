@@ -408,6 +408,21 @@ function buildUserParts(
     }
   }
 
+  // Add inline images (sent as visual content, not uploaded)
+  if ((turn as any).inlineImages?.length) {
+    for (let i = 0; i < (turn as any).inlineImages.length; i++) {
+      const img = (turn as any).inlineImages[i];
+      const ext = img.mediaType?.split("/")[1] || "png";
+      parts.push({
+        type: "file",
+        fileId: `inline-image-${turn.turnNumber}-${i}`,
+        filename: `image-${i + 1}.${ext}`,
+        mimeType: img.mediaType ?? "image/png",
+        base64Data: img.base64Data ?? null,
+      });
+    }
+  }
+
   // Strip the "[Attached files:...]" prefix — it's context for the LLM,
   // not meant for display
   const text = turn.userMessage.replace(ATTACHED_FILES_PREFIX, "");
