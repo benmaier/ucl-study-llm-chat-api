@@ -1,6 +1,6 @@
 {
   "name": "ucl-study-llm-chat-api",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Unified LLM chat API for Claude, OpenAI, and Gemini with code execution",
   "type": "module",
   "main": "./dist/index.js",

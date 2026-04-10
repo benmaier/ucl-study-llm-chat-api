@@ -219,12 +219,22 @@ function buildPartsFromClaude(turn: TurnRecord): UnifiedMessagePart[] {
       textAccum += block.text;
     } else if (block.type === "tool_use" || block.type === "server_tool_use") {
       flushText();
-      const code =
-        typeof block.input?.command === "string"
-          ? block.input.command
-          : typeof block.input?.code === "string"
-            ? block.input.code
-            : JSON.stringify(block.input ?? {});
+      // Extract the most useful representation of the tool input:
+      // - text_editor create: show the file_text (actual code written)
+      // - text_editor view: show the path
+      // - bash: show the command
+      // - fallback: JSON dump of input
+      let code: string;
+      const input = block.input ?? {};
+      if (typeof input.file_text === "string") {
+        code = input.file_text;
+      } else if (typeof input.command === "string") {
+        code = input.command;
+      } else if (typeof input.code === "string") {
+        code = input.code;
+      } else {
+        code = JSON.stringify(input);
+      }
       const partIndex = parts.length;
       parts.push({
         type: "tool-call",
