@@ -23,6 +23,46 @@ import type {
   ChatOptions,
 } from "./types.js";
 import { inferMimeType, mimeToExtension } from "./helpers.js";
+import { inflateSync } from "zlib";
+
+/**
+ * Detect blank white PNG images (Gemini's plt.show() emits empty canvases).
+ *
+ * Decompresses IDAT chunks and checks two conditions:
+ * 1. All byte values are in {0, 1, 2, 255} — PNG filter types + white
+ * 2. >99% of bytes are 0x00 — identical-to-previous deltas (uniform color)
+ *
+ * This safely distinguishes blank canvases from real B&W images, which have
+ * many non-zero delta bytes at line/edge positions.
+ */
+function isBlankWhitePng(base64Data: string): boolean {
+  try {
+    const buf = Buffer.from(base64Data, "base64");
+    if (buf[0] !== 0x89 || buf[1] !== 0x50) return false;
+
+    let offset = 8;
+    const idatBuffers: Buffer[] = [];
+    while (offset < buf.length) {
+      const chunkLen = buf.readUInt32BE(offset);
+      const type = buf.subarray(offset + 4, offset + 8).toString("ascii");
+      if (type === "IDAT") idatBuffers.push(buf.subarray(offset + 8, offset + 8 + chunkLen));
+      offset += 12 + chunkLen;
+    }
+
+    const pixels = inflateSync(Buffer.concat(idatBuffers));
+    if (pixels.length < 100) return false;
+
+    const allowed = new Set([0, 1, 2, 255]);
+    let zeroCount = 0;
+    for (let i = 0; i < pixels.length; i++) {
+      if (!allowed.has(pixels[i])) return false;
+      if (pixels[i] === 0) zeroCount++;
+    }
+    return zeroCount / pixels.length > 0.99;
+  } catch {
+    return false;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Client creation
@@ -322,6 +362,10 @@ function parseGeminiResponse(response: any): CodeExecutionResult {
         language: (part.executableCode.language || "PYTHON").toLowerCase(),
       });
     } else if (part.inlineData) {
+      // Skip blank white PNG images (Gemini's plt.show() emits empty canvases)
+      if (part.inlineData.mimeType === "image/png" && part.inlineData.data) {
+        if (isBlankWhitePng(part.inlineData.data)) continue;
+      }
       const ext = mimeToExtension(part.inlineData.mimeType || "image/png");
       const filename = `output_${inlineFileIndex}.${ext}`;
       files.push({
@@ -405,6 +449,10 @@ async function processGeminiStreamWithParts(
           codeBlockActive = false;
         }
       } else if (part.inlineData) {
+        // Skip blank white PNG images (Gemini's plt.show() emits empty canvases)
+        if (part.inlineData.mimeType === "image/png" && part.inlineData.data) {
+          if (isBlankWhitePng(part.inlineData.data)) continue;
+        }
         const ext = mimeToExtension(part.inlineData.mimeType || "image/png");
         const filename = `output_${inlineFileIndex}.${ext}`;
         files.push({
