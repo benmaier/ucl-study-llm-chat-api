@@ -22,6 +22,18 @@ import {
 } from "./types.js";
 import { inferMimeType, inferLanguage, extractCodeFromPartialJson } from "./helpers.js";
 
+/** Map MIME type to file extension for generated files. */
+function mimeToExt(mimeType?: string): string {
+  if (!mimeType) return "png";
+  const map: Record<string, string> = {
+    "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
+    "image/webp": "webp", "image/svg+xml": "svg",
+    "text/csv": "csv", "text/plain": "txt",
+    "application/json": "json", "application/pdf": "pdf",
+  };
+  return map[mimeType] || mimeType.split("/")[1] || "bin";
+}
+
 // Re-export types for convenience
 export type {
   UploadedFile,

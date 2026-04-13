@@ -709,6 +709,15 @@ export class Conversation {
           );
           file.base64Data = buffer.toString("base64");
           if (!file.mimeType && mimeType) file.mimeType = mimeType;
+          // Fix filename extension if mimeType contradicts it
+          // (SDK defaults to .png for all files before download)
+          if (file.mimeType && file.filename) {
+            const actualExt = file.mimeType.startsWith("image/") ? null : file.mimeType.split("/")[1];
+            const currentExt = file.filename.split(".").pop()?.toLowerCase();
+            if (actualExt && currentExt && actualExt !== currentExt && !file.mimeType.startsWith("image/")) {
+              file.filename = file.filename.replace(/\.\w+$/, `.${actualExt}`);
+            }
+          }
         } else if (this.provider === "openai") {
           const containerId = file.container_id || this.containerId;
           if (!containerId) {
